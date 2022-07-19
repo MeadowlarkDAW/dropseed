@@ -4,6 +4,7 @@ use basedrop::Shared;
 use smallvec::SmallVec;
 use std::error::Error;
 
+use crate::graph::buffers::pool::SharedBufferPool;
 use dropseed_core::plugin::buffer::{AudioPortBuffer, AudioPortBufferMut, SharedBuffer};
 use dropseed_core::plugin::ext::audio_ports::MainPortsLayout;
 use dropseed_core::plugin::{ProcBuffers, ProcEvent};
@@ -14,7 +15,7 @@ use crate::graph::shared_pool::{DelayCompKey, SharedDelayCompNode};
 use super::{
     schedule::sum::SumTask,
     schedule::task::{DeactivatedPluginTask, DelayCompTask, PluginTask, Task},
-    shared_pool::{SharedBufferPool, SharedPluginPool},
+    shared_pool::SharedPluginPool,
     verifier::{Verifier, VerifyScheduleError},
     PluginInstanceID, PortChannelID, PortType, Schedule,
 };

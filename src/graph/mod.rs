@@ -12,6 +12,8 @@ pub(crate) mod plugin_host;
 pub(crate) mod schedule;
 pub(crate) mod shared_pool;
 
+pub(crate) mod buffers;
+
 mod compiler;
 mod save_state;
 mod verifier;
@@ -27,7 +29,7 @@ use dropseed_core::transport::TempoMap;
 use plugin_host::OnIdleResult;
 use schedule::transport_task::{TransportHandle, TransportTask};
 use schedule::{Schedule, SharedSchedule};
-use shared_pool::{PluginInstanceHostEntry, SharedBufferPool, SharedPluginPool};
+use shared_pool::{PluginInstanceHostEntry, SharedPluginPool};
 use verifier::Verifier;
 
 use crate::engine::events::from_engine::{DSEngineEvent, PluginEvent};
@@ -36,6 +38,7 @@ use crate::engine::plugin_scanner::{NewPluginInstanceError, PluginScanner};
 use crate::graph::plugin_host::PluginInstanceHost;
 use crate::utils::thread_id::SharedThreadIDs;
 
+use crate::graph::buffers::pool::SharedBufferPool;
 pub use compiler::GraphCompilerError;
 pub use plugin_host::{
     ActivatePluginError, ParamGestureInfo, ParamModifiedInfo, PluginHandle, PluginParamsExt,

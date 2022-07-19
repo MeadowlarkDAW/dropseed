@@ -57,3 +57,7 @@ impl ProcEvent {
         }
     }
 }
+
+pub trait CoreEventExt {}
+
+impl<'a> CoreEventExt for CoreEventSpace<'a> {}
