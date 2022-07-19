@@ -1,195 +1,125 @@
-use dropseed_core::plugin::buffer::{DebugBufferID, DebugBufferType, SharedBuffer};
+use dropseed_core::plugin::buffer::{DebugBufferInfo, DebugBufferType, SharedBuffer};
 use dropseed_core::plugin::ProcEvent;
 
-struct BufferPool<T: Clone + Copy + Send + Sync + 'static> {
+pub struct BufferPool<T: Clone + Copy + Send + Sync + 'static> {
     pool: Vec<SharedBuffer<T>>,
     buffer_size: usize,
+    buffer_type: DebugBufferType,
     collection_handle: basedrop::Handle,
 }
 
 impl<T: Clone + Copy + Send + Sync + 'static> BufferPool<T> {
-    fn new(buffer_size: usize, collection_handle: basedrop::Handle) -> Self {
-        Self { pool: Vec::new(), buffer_size, collection_handle }
+    fn new(
+        buffer_size: usize,
+        buffer_type: DebugBufferType,
+        collection_handle: basedrop::Handle,
+    ) -> Self {
+        assert_ne!(buffer_size, 0);
+
+        Self { pool: Vec::new(), buffer_size, collection_handle, buffer_type }
     }
 
-    fn get_new(&mut self) -> SharedBuffer<T> {}
+    #[inline]
+    pub fn buffer_size(&self) -> usize {
+        self.buffer_size
+    }
+
+    pub fn buffer_at_index(&mut self, index: usize) -> SharedBuffer<T> {
+        if index >= self.pool.len() {
+            let mut current_generated_index = self.pool.len() as u32;
+
+            self.pool.resize_with(index + 1, || {
+                let buf = SharedBuffer::with_capacity(
+                    self.buffer_size,
+                    DebugBufferInfo {
+                        index: current_generated_index,
+                        buffer_type: self.buffer_type,
+                    },
+                    &self.collection_handle,
+                );
+                current_generated_index += 1;
+                buf
+            })
+        }
+
+        // PANIC: we have checked above that either index was in-bounds, or the pool got resized
+        self.pool[index].clone()
+    }
+}
+
+impl<T: Clone + Copy + Send + Sync + 'static + Default> BufferPool<T> {
+    pub fn initialized_buffer_at_index(&mut self, index: usize) -> SharedBuffer<T> {
+        if index >= self.pool.len() {
+            let mut current_generated_index = self.pool.len() as u32;
+
+            self.pool.resize_with(index + 1, || {
+                let buf = SharedBuffer::new(
+                    self.buffer_size,
+                    DebugBufferInfo {
+                        index: current_generated_index,
+                        buffer_type: self.buffer_type,
+                    },
+                    &self.collection_handle,
+                );
+                current_generated_index += 1;
+                buf
+            })
+        }
+
+        // PANIC: we have checked above that either index was in-bounds, or the pool got resized
+        self.pool[index].clone()
+    }
 }
 
 pub struct SharedBufferPool {
-    pub audio_buffer_size: u32,
-    pub note_buffer_size: usize,
-    pub automation_buffer_size: usize,
+    pub audio_buffer_pool: BufferPool<f32>,
+    pub intermediary_audio_buffer_pool: BufferPool<f32>,
 
-    audio_buffers_f32: Vec<Option<SharedBuffer<f32>>>,
-    audio_buffers_f64: Vec<Option<SharedBuffer<f64>>>,
-
-    intermediary_audio_f32: Vec<Option<SharedBuffer<f32>>>,
-
-    automation_buffers: Vec<Option<SharedBuffer<ProcEvent>>>,
-    note_buffers: Vec<Option<SharedBuffer<ProcEvent>>>,
-
-    coll_handle: basedrop::Handle,
+    pub event_buffer_pool: BufferPool<ProcEvent>,
+    pub note_buffer_pool: BufferPool<ProcEvent>, // TODO: this should be NoteEvent
 }
 
 impl SharedBufferPool {
     pub fn new(
-        audio_buffer_size: u32,
+        audio_buffer_size: usize,
         note_buffer_size: usize,
-        automation_buffer_size: usize,
+        event_buffer_size: usize,
         coll_handle: basedrop::Handle,
     ) -> Self {
-        assert_ne!(audio_buffer_size, 0);
-        assert_ne!(note_buffer_size, 0);
-        assert_ne!(automation_buffer_size, 0);
-
         Self {
-            audio_buffers_f32: Vec::new(),
-            audio_buffers_f64: Vec::new(),
-            intermediary_audio_f32: Vec::new(),
-            automation_buffers: Vec::new(),
-            note_buffers: Vec::new(),
-            audio_buffer_size,
-            note_buffer_size,
-            automation_buffer_size,
-            coll_handle,
-        }
-    }
-
-    pub fn audio_f32(&mut self, index: usize) -> SharedBuffer<f32> {
-        if self.audio_buffers_f32.len() <= index {
-            let n_new_slots = (index + 1) - self.audio_buffers_f32.len();
-            for _ in 0..n_new_slots {
-                self.audio_buffers_f32.push(None);
-            }
-        }
-
-        let slot = &mut self.audio_buffers_f32[index];
-
-        if let Some(b) = slot {
-            b.clone()
-        } else {
-            *slot = Some(SharedBuffer::_new_f32(
-                self.audio_buffer_size as usize,
-                DebugBufferID { buffer_type: DebugBufferType::Audio32, index: index as u32 },
-                &self.coll_handle,
-            ));
-
-            slot.as_ref().unwrap().clone()
-        }
-    }
-
-    pub fn intermediary_audio_f32(&mut self, index: usize) -> SharedBuffer<f32> {
-        if self.intermediary_audio_f32.len() <= index {
-            let n_new_slots = (index + 1) - self.intermediary_audio_f32.len();
-            for _ in 0..n_new_slots {
-                self.intermediary_audio_f32.push(None);
-            }
-        }
-
-        let slot = &mut self.intermediary_audio_f32[index];
-
-        if let Some(b) = slot {
-            b.clone()
-        } else {
-            *slot = Some(SharedBuffer::_new_f32(
-                self.audio_buffer_size as usize,
-                DebugBufferID {
-                    buffer_type: DebugBufferType::IntermediaryAudio32,
-                    index: index as u32,
-                },
-                &self.coll_handle,
-            ));
-
-            slot.as_ref().unwrap().clone()
-        }
-    }
-
-    pub fn note_buffer(&mut self, index: usize) -> SharedBuffer<ProcEvent> {
-        if self.note_buffers.len() <= index {
-            let n_new_slots = (index + 1) - self.note_buffers.len();
-            for _ in 0..n_new_slots {
-                self.note_buffers.push(None);
-            }
-        }
-
-        let slot = &mut self.note_buffers[index];
-
-        if let Some(b) = slot {
-            b.clone()
-        } else {
-            *slot = Some(SharedBuffer::_new(
-                self.note_buffer_size,
-                DebugBufferID { buffer_type: DebugBufferType::NoteBuffer, index: index as u32 },
-                &self.coll_handle,
-            ));
-
-            slot.as_ref().unwrap().clone()
-        }
-    }
-
-    pub fn automation_buffer(&mut self, index: usize) -> SharedBuffer<ProcEvent> {
-        if self.automation_buffers.len() <= index {
-            let n_new_slots = (index + 1) - self.automation_buffers.len();
-            for _ in 0..n_new_slots {
-                self.automation_buffers.push(None);
-            }
-        }
-
-        let slot = &mut self.automation_buffers[index];
-
-        if let Some(b) = slot {
-            b.clone()
-        } else {
-            *slot = Some(SharedBuffer::_new(
-                self.automation_buffer_size,
-                DebugBufferID {
-                    buffer_type: DebugBufferType::ParamAutomation,
-                    index: index as u32,
-                },
-                &self.coll_handle,
-            ));
-
-            slot.as_ref().unwrap().clone()
+            audio_buffer_pool: BufferPool::new(
+                audio_buffer_size,
+                DebugBufferType::Audio32,
+                coll_handle.clone(),
+            ),
+            intermediary_audio_buffer_pool: BufferPool::new(
+                audio_buffer_size,
+                DebugBufferType::IntermediaryAudio32,
+                coll_handle.clone(),
+            ),
+            note_buffer_pool: BufferPool::new(
+                note_buffer_size,
+                DebugBufferType::Note,
+                coll_handle.clone(),
+            ),
+            event_buffer_pool: BufferPool::new(
+                event_buffer_size,
+                DebugBufferType::Event,
+                coll_handle,
+            ),
         }
     }
 
     pub fn remove_excess_buffers(
         &mut self,
-        max_buffer_index: usize,
-        total_intermediary_buffers: usize,
-        max_note_buffer_index: usize,
-        max_automation_buffer_index: usize,
+        audio_buffer_count: usize,
+        intermediary_audio_buffer_count: usize,
+        note_buffers_count: usize,
+        event_buffer_count: usize,
     ) {
-        if self.audio_buffers_f32.len() > max_buffer_index + 1 {
-            let n_slots_to_remove = self.audio_buffers_f32.len() - (max_buffer_index + 1);
-            for _ in 0..n_slots_to_remove {
-                let _ = self.audio_buffers_f32.pop();
-            }
-        }
-        if self.audio_buffers_f64.len() > max_buffer_index + 1 {
-            let n_slots_to_remove = self.audio_buffers_f64.len() - (max_buffer_index + 1);
-            for _ in 0..n_slots_to_remove {
-                let _ = self.audio_buffers_f64.pop();
-            }
-        }
-        if self.intermediary_audio_f32.len() > total_intermediary_buffers {
-            let n_slots_to_remove = self.intermediary_audio_f32.len() - total_intermediary_buffers;
-            for _ in 0..n_slots_to_remove {
-                let _ = self.intermediary_audio_f32.pop();
-            }
-        }
-        if self.note_buffers.len() > max_note_buffer_index + 1 {
-            let n_slots_to_remove = self.note_buffers.len() - (max_note_buffer_index + 1);
-            for _ in 0..n_slots_to_remove {
-                let _ = self.note_buffers.pop();
-            }
-        }
-        if self.automation_buffers.len() > max_automation_buffer_index + 1 {
-            let n_slots_to_remove =
-                self.automation_buffers.len() - (max_automation_buffer_index + 1);
-            for _ in 0..n_slots_to_remove {
-                let _ = self.automation_buffers.pop();
-            }
-        }
+        self.audio_buffer_pool.pool.truncate(audio_buffer_count + 1);
+        self.intermediary_audio_buffer_pool.pool.truncate(intermediary_audio_buffer_count + 1);
+        self.note_buffer_pool.pool.truncate(note_buffers_count + 1);
+        self.event_buffer_pool.pool.truncate(event_buffer_count + 1);
     }
 }

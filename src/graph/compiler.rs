@@ -132,12 +132,15 @@ pub(crate) fn compile_graph(
                         max_graph_audio_buffer_index =
                             max_graph_audio_buffer_index.max(buffer.buffer_id);
 
-                        let graph_buffer = shared_buffer_pool.audio_f32(buffer.buffer_id);
+                        let graph_buffer = shared_buffer_pool
+                            .audio_buffer_pool
+                            .initialized_buffer_at_index(buffer.buffer_id);
 
                         let channel_buffer = if let Some(delay_comp_info) = &delay_comp_info {
                             // Add an intermediate buffer for the delay compensation task.
-                            let intermediary_buffer =
-                                shared_buffer_pool.intermediary_audio_f32(intermediary_buffer_i);
+                            let intermediary_buffer = shared_buffer_pool
+                                .intermediary_audio_buffer_pool
+                                .initialized_buffer_at_index(intermediary_buffer_i);
 
                             intermediary_buffer_i += 1;
                             total_intermediary_buffers =
@@ -192,8 +195,9 @@ pub(crate) fn compile_graph(
                         channel_buffers[0].clone()
                     } else {
                         // Add an intermediate buffer for the sum task.
-                        let intermediary_buffer =
-                            shared_buffer_pool.intermediary_audio_f32(intermediary_buffer_i);
+                        let intermediary_buffer = shared_buffer_pool
+                            .intermediary_audio_buffer_pool
+                            .initialized_buffer_at_index(intermediary_buffer_i);
                         intermediary_buffer_i += 1;
                         total_intermediary_buffers =
                             total_intermediary_buffers.max(intermediary_buffer_i);
@@ -218,7 +222,8 @@ pub(crate) fn compile_graph(
                         max_graph_automation_buffer_index =
                             max_graph_automation_buffer_index.max(buffer.buffer_id);
 
-                        let buffer = shared_buffer_pool.automation_buffer(buffer.buffer_id);
+                        let buffer =
+                            shared_buffer_pool.event_buffer_pool.buffer_at_index(buffer.buffer_id);
 
                         bufs.push(buffer);
                     }
@@ -239,7 +244,9 @@ pub(crate) fn compile_graph(
                                     max_graph_note_buffer_index =
                                         max_graph_note_buffer_index.max(buffer.buffer_id);
 
-                                    let buffer = shared_buffer_pool.note_buffer(buffer.buffer_id);
+                                    let buffer = shared_buffer_pool
+                                        .note_buffer_pool
+                                        .buffer_at_index(buffer.buffer_id);
 
                                     bufs.push(buffer);
                                 }
@@ -280,14 +287,17 @@ pub(crate) fn compile_graph(
                         next_audio_out_channel_index - 1
                     };
 
-                    let graph_buffer = shared_buffer_pool.audio_f32(buffer.buffer_id);
+                    let graph_buffer = shared_buffer_pool
+                        .audio_buffer_pool
+                        .initialized_buffer_at_index(buffer.buffer_id);
                     plugin_out_channel_buffers[channel_index] = Some(graph_buffer);
                 }
                 PortType::ParamAutomation => {
                     max_graph_automation_buffer_index =
                         max_graph_automation_buffer_index.max(buffer.buffer_id);
 
-                    let buffer = shared_buffer_pool.automation_buffer(buffer.buffer_id);
+                    let buffer =
+                        shared_buffer_pool.event_buffer_pool.buffer_at_index(buffer.buffer_id);
 
                     automation_out_buffer = Some(buffer);
                 }
@@ -299,7 +309,9 @@ pub(crate) fn compile_graph(
                                 max_graph_note_buffer_index =
                                     max_graph_note_buffer_index.max(buffer.buffer_id);
 
-                                let buffer = shared_buffer_pool.note_buffer(buffer.buffer_id);
+                                let buffer = shared_buffer_pool
+                                    .note_buffer_pool
+                                    .buffer_at_index(buffer.buffer_id);
 
                                 note_out_buffers[port_i] = Some(buffer);
 
@@ -399,7 +411,10 @@ pub(crate) fn compile_graph(
                 port_i += 1;
             }
 
-            audio_in.push(AudioPortBuffer::_new(buffers, shared_buffer_pool.audio_buffer_size));
+            audio_in.push(AudioPortBuffer::_new(
+                buffers,
+                shared_buffer_pool.audio_buffer_pool.buffer_size() as u32,
+            ));
             // TODO: proper latency?
         }
         port_i = 0;
@@ -411,7 +426,10 @@ pub(crate) fn compile_graph(
                 port_i += 1;
             }
 
-            audio_out.push(AudioPortBufferMut::_new(buffers, shared_buffer_pool.audio_buffer_size));
+            audio_out.push(AudioPortBufferMut::_new(
+                buffers,
+                shared_buffer_pool.audio_buffer_pool.buffer_size() as u32,
+            ));
             // TODO: proper latency?
         }
 
@@ -431,7 +449,7 @@ pub(crate) fn compile_graph(
         tasks,
         graph_audio_in,
         graph_audio_out,
-        max_block_size: shared_buffer_pool.audio_buffer_size as usize,
+        max_block_size: shared_buffer_pool.audio_buffer_pool.buffer_size(),
         shared_transport_task: Shared::clone(shared_transport_task),
     };
 

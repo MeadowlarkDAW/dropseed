@@ -124,7 +124,7 @@ impl AudioGraph {
 
         let shared_plugin_pool = SharedPluginPool::new();
         let shared_buffer_pool = SharedBufferPool::new(
-            max_frames,
+            max_frames as usize,
             note_buffer_size,
             event_buffer_size,
             coll_handle.clone(),

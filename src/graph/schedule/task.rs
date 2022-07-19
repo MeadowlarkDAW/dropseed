@@ -1,4 +1,5 @@
 use smallvec::SmallVec;
+use std::fmt::{Debug, Error, Formatter, Write};
 
 use dropseed_core::plugin::buffer::SharedBuffer;
 use dropseed_core::plugin::{ProcBuffers, ProcEvent, ProcInfo};
@@ -14,8 +15,8 @@ pub(crate) enum Task {
     DeactivatedPlugin(DeactivatedPluginTask),
 }
 
-impl std::fmt::Debug for Task {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for Task {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match self {
             Task::Plugin(t) => {
                 let mut f = f.debug_struct("Plugin");
@@ -25,7 +26,7 @@ impl std::fmt::Debug for Task {
                 if !t.buffers.audio_in.is_empty() {
                     let mut s = String::new();
                     for b in t.buffers.audio_in.iter() {
-                        s.push_str(&format!("{:?}, ", b))
+                        write!(s, "{:?}, ", b)?;
                     }
 
                     f.field("audio_in", &s);
@@ -34,7 +35,7 @@ impl std::fmt::Debug for Task {
                 if !t.buffers.audio_out.is_empty() {
                     let mut s = String::new();
                     for b in t.buffers.audio_out.iter() {
-                        s.push_str(&format!("{:?}, ", b))
+                        write!(s, "{:?}, ", b)?;
                     }
 
                     f.field("audio_out", &s);
@@ -43,14 +44,14 @@ impl std::fmt::Debug for Task {
                 if let Some(automation_in_buffers) = &t.automation_in_buffers {
                     let mut s = String::new();
                     for b in automation_in_buffers.iter() {
-                        s.push_str(&format!("{:?}, ", b.id()))
+                        s.push_str(&format!("{:?}, ", b.info()))
                     }
 
                     f.field("automation_in", &s);
                 }
 
                 if let Some(automation_out_buffer) = &t.automation_out_buffer {
-                    f.field("automation_out", &format!("{:?}", automation_out_buffer.id()));
+                    f.field("automation_out", &format!("{:?}", automation_out_buffer.info()));
                 }
 
                 if !t.note_in_buffers.is_empty() {
@@ -62,7 +63,7 @@ impl std::fmt::Debug for Task {
                         s.push('[');
 
                         for b in buffers.iter() {
-                            s.push_str(&format!("{:?}, ", b.id()))
+                            s.push_str(&format!("{:?}, ", b.info()))
                         }
 
                         s.push_str("], ");
@@ -79,7 +80,7 @@ impl std::fmt::Debug for Task {
                     for buffer in t.note_out_buffers.iter().flatten() {
                         has_buffer = true;
 
-                        s.push_str(&format!("{:?}, ", buffer.id()));
+                        s.push_str(&format!("{:?}, ", buffer.info()));
                     }
 
                     if has_buffer {
@@ -92,8 +93,8 @@ impl std::fmt::Debug for Task {
             Task::DelayComp(t) => {
                 let mut f = f.debug_struct("DelayComp");
 
-                f.field("audio_in", &t.audio_in.id());
-                f.field("audio_out", &t.audio_out.id());
+                f.field("audio_in", &t.audio_in.info());
+                f.field("audio_out", &t.audio_out.info());
                 f.field("delay", &t.delay_comp_node.delay());
 
                 f.finish()
@@ -103,11 +104,11 @@ impl std::fmt::Debug for Task {
 
                 let mut s = String::new();
                 for b in t.audio_in.iter() {
-                    s.push_str(&format!("{:?}, ", b.id()))
+                    write!(s, "{:?}, ", b.info())?;
                 }
                 f.field("audio_in", &s);
 
-                f.field("audio_out", &format!("{:?}", t.audio_out.id()));
+                f.field("audio_out", &format!("{:?}", t.audio_out.info()));
 
                 f.finish()
             }
@@ -116,18 +117,18 @@ impl std::fmt::Debug for Task {
 
                 let mut s = String::new();
                 for (b_in, b_out) in t.audio_through.iter() {
-                    s.push_str(&format!("(in: {:?}, out: {:?})", b_in.id(), b_out.id()));
+                    s.push_str(&format!("(in: {:?}, out: {:?})", b_in.info(), b_out.info()));
                 }
                 f.field("audio_through", &s);
 
                 let mut s = String::new();
                 for b in t.extra_audio_out.iter() {
-                    s.push_str(&format!("{:?}, ", b.id()))
+                    s.push_str(&format!("{:?}, ", b.info()))
                 }
                 f.field("extra_audio_out", &s);
 
                 if let Some(automation_out_buffer) = &t.automation_out_buffer {
-                    f.field("automation_out", &format!("{:?}", automation_out_buffer.id()));
+                    f.field("automation_out", &format!("{:?}", automation_out_buffer.info()));
                 }
 
                 if !t.note_out_buffers.is_empty() {
@@ -136,7 +137,7 @@ impl std::fmt::Debug for Task {
                     for buffer in t.note_out_buffers.iter().flatten() {
                         has_buffer = true;
 
-                        s.push_str(&format!("{:?}, ", buffer.id()));
+                        s.push_str(&format!("{:?}, ", buffer.info()));
                     }
 
                     if has_buffer {
@@ -229,15 +230,13 @@ impl DeactivatedPluginTask {
 
         // Make sure all output buffers are cleared.
         for out_buf in self.extra_audio_out.iter() {
-            out_buf.clear_f32(proc_info.frames);
+            out_buf.clear_until(proc_info.frames);
         }
         if let Some(out_buf) = &self.automation_out_buffer {
-            let mut b = out_buf.borrow_mut();
-            b.clear();
+            out_buf.truncate();
         }
         for out_buf in self.note_out_buffers.iter().flatten() {
-            let mut b = out_buf.borrow_mut();
-            b.clear();
+            out_buf.truncate();
         }
     }
 }

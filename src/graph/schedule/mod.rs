@@ -49,7 +49,7 @@ impl std::fmt::Debug for Schedule {
 
         let mut g_s = String::new();
         for b in self.graph_audio_in.iter() {
-            g_s.push_str(&format!("{:?}, ", b.id()))
+            g_s.push_str(&format!("{:?}, ", b.info()))
         }
         s.push_str(format!("    graph_audio_in: {:?},\n", &g_s).as_str());
 
@@ -59,7 +59,7 @@ impl std::fmt::Debug for Schedule {
 
         let mut g_s = String::new();
         for b in self.graph_audio_out.iter() {
-            g_s.push_str(&format!("{:?}, ", b.id()))
+            g_s.push_str(&format!("{:?}, ", b.info()))
         }
         s.push_str(format!("    graph_audio_out: {:?},\n}}", &g_s).as_str());
 
@@ -131,7 +131,7 @@ impl Schedule {
 
                     in_buffer.set_constant(is_constant);
                 } else {
-                    in_buffer.clear_f32(frames);
+                    in_buffer.clear_until(frames);
                 }
             }
 
