@@ -44,14 +44,14 @@ impl Debug for Task {
                 if let Some(automation_in_buffers) = &t.automation_in_buffers {
                     let mut s = String::new();
                     for b in automation_in_buffers.iter() {
-                        s.push_str(&format!("{:?}, ", b.info()))
+                        s.push_str(&format!("{:?}, ", b.id()))
                     }
 
                     f.field("automation_in", &s);
                 }
 
                 if let Some(automation_out_buffer) = &t.automation_out_buffer {
-                    f.field("automation_out", &format!("{:?}", automation_out_buffer.info()));
+                    f.field("automation_out", &format!("{:?}", automation_out_buffer.id()));
                 }
 
                 if !t.note_in_buffers.is_empty() {
@@ -63,7 +63,7 @@ impl Debug for Task {
                         s.push('[');
 
                         for b in buffers.iter() {
-                            s.push_str(&format!("{:?}, ", b.info()))
+                            s.push_str(&format!("{:?}, ", b.id()))
                         }
 
                         s.push_str("], ");
@@ -80,7 +80,7 @@ impl Debug for Task {
                     for buffer in t.note_out_buffers.iter().flatten() {
                         has_buffer = true;
 
-                        s.push_str(&format!("{:?}, ", buffer.info()));
+                        s.push_str(&format!("{:?}, ", buffer.id()));
                     }
 
                     if has_buffer {
@@ -93,8 +93,8 @@ impl Debug for Task {
             Task::DelayComp(t) => {
                 let mut f = f.debug_struct("DelayComp");
 
-                f.field("audio_in", &t.audio_in.info());
-                f.field("audio_out", &t.audio_out.info());
+                f.field("audio_in", &t.audio_in.id());
+                f.field("audio_out", &t.audio_out.id());
                 f.field("delay", &t.delay_comp_node.delay());
 
                 f.finish()
@@ -104,11 +104,11 @@ impl Debug for Task {
 
                 let mut s = String::new();
                 for b in t.audio_in.iter() {
-                    write!(s, "{:?}, ", b.info())?;
+                    write!(s, "{:?}, ", b.id())?;
                 }
                 f.field("audio_in", &s);
 
-                f.field("audio_out", &format!("{:?}", t.audio_out.info()));
+                f.field("audio_out", &format!("{:?}", t.audio_out.id()));
 
                 f.finish()
             }
@@ -117,18 +117,18 @@ impl Debug for Task {
 
                 let mut s = String::new();
                 for (b_in, b_out) in t.audio_through.iter() {
-                    s.push_str(&format!("(in: {:?}, out: {:?})", b_in.info(), b_out.info()));
+                    s.push_str(&format!("(in: {:?}, out: {:?})", b_in.id(), b_out.id()));
                 }
                 f.field("audio_through", &s);
 
                 let mut s = String::new();
                 for b in t.extra_audio_out.iter() {
-                    s.push_str(&format!("{:?}, ", b.info()))
+                    s.push_str(&format!("{:?}, ", b.id()))
                 }
                 f.field("extra_audio_out", &s);
 
                 if let Some(automation_out_buffer) = &t.automation_out_buffer {
-                    f.field("automation_out", &format!("{:?}", automation_out_buffer.info()));
+                    f.field("automation_out", &format!("{:?}", automation_out_buffer.id()));
                 }
 
                 if !t.note_out_buffers.is_empty() {
@@ -137,7 +137,7 @@ impl Debug for Task {
                     for buffer in t.note_out_buffers.iter().flatten() {
                         has_buffer = true;
 
-                        s.push_str(&format!("{:?}, ", buffer.info()));
+                        s.push_str(&format!("{:?}, ", buffer.id()));
                     }
 
                     if has_buffer {

@@ -29,12 +29,12 @@ impl Debug for DebugBufferType {
 
 /// Used for debugging and verifying purposes.
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct DebugBufferInfo {
+pub struct DebugBufferID {
     pub index: u32,
     pub buffer_type: DebugBufferType,
 }
 
-impl Debug for DebugBufferInfo {
+impl Debug for DebugBufferID {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}({})", self.buffer_type, self.index)
     }
@@ -43,7 +43,7 @@ impl Debug for DebugBufferInfo {
 struct Buffer<T: Clone + Copy + Send + Sync + 'static> {
     data: AtomicRefCell<Vec<T>>,
     is_constant: AtomicBool,
-    debug_info: DebugBufferInfo,
+    debug_info: DebugBufferID,
 }
 
 impl<T: Clone + Copy + Send + Sync + 'static> Buffer<T> {}
@@ -55,7 +55,7 @@ pub struct SharedBuffer<T: Clone + Copy + Send + Sync + 'static> {
 impl<T: Clone + Copy + Send + Sync + 'static> SharedBuffer<T> {
     pub fn with_capacity(
         capacity: usize,
-        debug_info: DebugBufferInfo,
+        debug_info: DebugBufferID,
         coll_handle: &basedrop::Handle,
     ) -> Self {
         Self {
@@ -91,7 +91,7 @@ impl<T: Clone + Copy + Send + Sync + 'static> SharedBuffer<T> {
     }
 
     #[inline]
-    pub fn info(&self) -> DebugBufferInfo {
+    pub fn id(&self) -> DebugBufferID {
         self.buffer.debug_info
     }
 
@@ -103,7 +103,7 @@ impl<T: Clone + Copy + Send + Sync + 'static> SharedBuffer<T> {
 impl<T: Clone + Copy + Send + Sync + 'static + Default> SharedBuffer<T> {
     pub fn new(
         max_frames: usize,
-        debug_info: DebugBufferInfo,
+        debug_info: DebugBufferID,
         coll_handle: &basedrop::Handle,
     ) -> Self {
         Self {
@@ -150,10 +150,10 @@ impl Debug for RawAudioChannelBuffers {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match &self {
             RawAudioChannelBuffers::F32(buffers) => {
-                f.debug_list().entries(buffers.iter().map(|b| b.info())).finish()
+                f.debug_list().entries(buffers.iter().map(|b| b.id())).finish()
             }
             RawAudioChannelBuffers::F64(buffers) => {
-                f.debug_list().entries(buffers.iter().map(|b| b.info())).finish()
+                f.debug_list().entries(buffers.iter().map(|b| b.id())).finish()
             }
         }
     }
@@ -290,9 +290,7 @@ impl AudioPortBufferMut {
     }
 
     #[inline]
-    pub fn stereo_f32_mut<'a>(
-        &'a mut self,
-    ) -> Option<(AtomicRefMut<'a, Vec<f32>>, AtomicRefMut<'a, Vec<f32>>)> {
+    pub fn stereo_f32_mut(&mut self) -> Option<(AtomicRefMut<Vec<f32>>, AtomicRefMut<Vec<f32>>)> {
         match &mut self._raw_channels {
             RawAudioChannelBuffers::F32(b) => {
                 if b.len() > 1 {

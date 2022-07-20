@@ -1,4 +1,4 @@
-use dropseed_core::plugin::buffer::{DebugBufferInfo, DebugBufferType, SharedBuffer};
+use dropseed_core::plugin::buffer::{DebugBufferID, DebugBufferType, SharedBuffer};
 use dropseed_core::plugin::ProcEvent;
 
 pub struct BufferPool<T: Clone + Copy + Send + Sync + 'static> {
@@ -31,10 +31,7 @@ impl<T: Clone + Copy + Send + Sync + 'static> BufferPool<T> {
             self.pool.resize_with(index + 1, || {
                 let buf = SharedBuffer::with_capacity(
                     self.buffer_size,
-                    DebugBufferInfo {
-                        index: current_generated_index,
-                        buffer_type: self.buffer_type,
-                    },
+                    DebugBufferID { index: current_generated_index, buffer_type: self.buffer_type },
                     &self.collection_handle,
                 );
                 current_generated_index += 1;
@@ -55,10 +52,7 @@ impl<T: Clone + Copy + Send + Sync + 'static + Default> BufferPool<T> {
             self.pool.resize_with(index + 1, || {
                 let buf = SharedBuffer::new(
                     self.buffer_size,
-                    DebugBufferInfo {
-                        index: current_generated_index,
-                        buffer_type: self.buffer_type,
-                    },
+                    DebugBufferID { index: current_generated_index, buffer_type: self.buffer_type },
                     &self.collection_handle,
                 );
                 current_generated_index += 1;
