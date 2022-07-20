@@ -146,15 +146,6 @@ pub enum RawAudioChannelBuffers {
     F64(SmallVec<[SharedBuffer<f64>; 2]>),
 }
 
-impl RawAudioChannelBuffers {
-    fn num_channels(&self) -> usize {
-        match self {
-            RawAudioChannelBuffers::F32(c) => c.len(),
-            RawAudioChannelBuffers::F64(c) => c.len(),
-        }
-    }
-}
-
 impl Debug for RawAudioChannelBuffers {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match &self {
@@ -166,26 +157,6 @@ impl Debug for RawAudioChannelBuffers {
             }
         }
     }
-}
-
-pub enum MonoBuffer<'a> {
-    F32(AtomicRef<'a, Vec<f32>>),
-    F64(AtomicRef<'a, Vec<f64>>),
-}
-
-pub enum MonoBufferMut<'a> {
-    F32(AtomicRefMut<'a, Vec<f32>>),
-    F64(AtomicRefMut<'a, Vec<f64>>),
-}
-
-pub enum StereoBuffer<'a> {
-    F32(AtomicRef<'a, Vec<f32>>, AtomicRef<'a, Vec<f32>>),
-    F64(AtomicRef<'a, Vec<f64>>, AtomicRef<'a, Vec<f64>>),
-}
-
-pub enum StereoBufferMut<'a> {
-    F32(AtomicRefMut<'a, Vec<f32>>, AtomicRefMut<'a, Vec<f32>>),
-    F64(AtomicRefMut<'a, Vec<f64>>, AtomicRefMut<'a, Vec<f64>>),
 }
 
 pub struct AudioPortBuffer {
@@ -228,137 +199,8 @@ impl AudioPortBuffer {
         }
     }
 
-    pub fn num_channels(&self) -> usize {
-        self._raw_channels.num_channels()
-    }
-
     pub fn latency(&self) -> u32 {
         self.latency
-    }
-
-    pub fn constant_mask(&self) -> u64 {
-        self.constant_mask
-    }
-
-    #[inline]
-    pub fn channel(&self, index: usize) -> Option<MonoBuffer> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                b.get(index).map(|b| MonoBuffer::F32(b.buffer.data.borrow()))
-            }
-            RawAudioChannelBuffers::F64(b) => {
-                b.get(index).map(|b| MonoBuffer::F64(b.buffer.data.borrow()))
-            }
-        }
-    }
-
-    #[inline]
-    pub fn mono(&self) -> MonoBuffer {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => MonoBuffer::F32(b[0].buffer.data.borrow()),
-            RawAudioChannelBuffers::F64(b) => MonoBuffer::F64(b[0].buffer.data.borrow()),
-        }
-    }
-
-    #[inline]
-    pub fn stereo(&self) -> Option<StereoBuffer> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                if b.len() > 1 {
-                    Some(StereoBuffer::F32(b[0].buffer.data.borrow(), b[1].buffer.data.borrow()))
-                } else {
-                    None
-                }
-            }
-            RawAudioChannelBuffers::F64(b) => {
-                if b.len() > 1 {
-                    Some(StereoBuffer::F64(b[0].buffer.data.borrow(), b[1].buffer.data.borrow()))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    #[inline]
-    pub fn channel_f32<'a>(&'a self, index: usize) -> Option<AtomicRef<'a, Vec<f32>>> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => b.get(index).map(|b| b.buffer.data.borrow()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn mono_f32<'a>(&'a self) -> Option<AtomicRef<'a, Vec<f32>>> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => Some(b[0].buffer.data.borrow()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn stereo_f32<'a>(&'a self) -> Option<(AtomicRef<'a, Vec<f32>>, AtomicRef<'a, Vec<f32>>)> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                if b.len() > 1 {
-                    Some((b[0].buffer.data.borrow(), b[1].buffer.data.borrow()))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-
-    pub fn is_channel_silent(&self, ch: usize, use_slow_check: bool, frames: usize) -> bool {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(buffers) => {
-                if let Some(buf) = buffers.get(ch) {
-                    if self.constant_mask & (1 << ch) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
-                            return false;
-                        }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-            RawAudioChannelBuffers::F64(buffers) => {
-                if let Some(buf) = buffers.get(ch) {
-                    if self.constant_mask & (1 << ch) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
-                            return false;
-                        }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-        }
-
-        true
     }
 
     pub fn is_silent(&self, use_slow_check: bool, frames: usize) -> bool {
@@ -428,6 +270,10 @@ impl AudioPortBufferMut {
         Self { _raw_channels: RawAudioChannelBuffers::F32(buffers), latency, constant_mask: 0 }
     }
 
+    pub fn latency(&self) -> u32 {
+        self.latency
+    }
+
     pub fn _sync_constant_mask_to_buffers(&mut self) {
         match &self._raw_channels {
             RawAudioChannelBuffers::F32(buffers) => {
@@ -443,146 +289,6 @@ impl AudioPortBufferMut {
         }
     }
 
-    pub fn num_channels(&self) -> usize {
-        self._raw_channels.num_channels()
-    }
-
-    pub fn latency(&self) -> u32 {
-        self.latency
-    }
-
-    #[inline]
-    pub fn channel(&self, index: usize) -> Option<MonoBuffer> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                b.get(index).map(|b| MonoBuffer::F32(b.buffer.data.borrow()))
-            }
-            RawAudioChannelBuffers::F64(b) => {
-                b.get(index).map(|b| MonoBuffer::F64(b.buffer.data.borrow()))
-            }
-        }
-    }
-
-    #[inline]
-    pub fn channel_mut(&mut self, index: usize) -> Option<MonoBufferMut> {
-        match &mut self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                b.get(index).map(|b| MonoBufferMut::F32(b.buffer.data.borrow_mut()))
-            }
-            RawAudioChannelBuffers::F64(b) => {
-                b.get(index).map(|b| MonoBufferMut::F64(b.buffer.data.borrow_mut()))
-            }
-        }
-    }
-
-    #[inline]
-    pub fn mono(&self) -> MonoBuffer {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => MonoBuffer::F32(b[0].buffer.data.borrow()),
-            RawAudioChannelBuffers::F64(b) => MonoBuffer::F64(b[0].buffer.data.borrow()),
-        }
-    }
-
-    #[inline]
-    pub fn mono_mut(&mut self) -> MonoBufferMut {
-        match &mut self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => MonoBufferMut::F32(b[0].buffer.data.borrow_mut()),
-            RawAudioChannelBuffers::F64(b) => MonoBufferMut::F64(b[0].buffer.data.borrow_mut()),
-        }
-    }
-
-    #[inline]
-    pub fn stereo(&self) -> Option<StereoBuffer> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                if b.len() > 1 {
-                    Some(StereoBuffer::F32(b[0].buffer.data.borrow(), b[1].buffer.data.borrow()))
-                } else {
-                    None
-                }
-            }
-            RawAudioChannelBuffers::F64(b) => {
-                if b.len() > 1 {
-                    Some(StereoBuffer::F64(b[0].buffer.data.borrow(), b[1].buffer.data.borrow()))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    #[inline]
-    pub fn stereo_mut(&mut self) -> Option<StereoBufferMut> {
-        match &mut self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                if b.len() > 1 {
-                    Some(StereoBufferMut::F32(
-                        b[0].buffer.data.borrow_mut(),
-                        b[1].buffer.data.borrow_mut(),
-                    ))
-                } else {
-                    None
-                }
-            }
-            RawAudioChannelBuffers::F64(b) => {
-                if b.len() > 1 {
-                    Some(StereoBufferMut::F64(
-                        b[0].buffer.data.borrow_mut(),
-                        b[1].buffer.data.borrow_mut(),
-                    ))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    #[inline]
-    pub fn channel_f32<'a>(&'a self, index: usize) -> Option<AtomicRef<'a, Vec<f32>>> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => b.get(index).map(|b| b.buffer.data.borrow()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn channel_f32_mut<'a>(&'a mut self, index: usize) -> Option<AtomicRefMut<'a, Vec<f32>>> {
-        match &mut self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => b.get_mut(index).map(|b| b.buffer.data.borrow_mut()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn mono_f32<'a>(&'a self) -> Option<AtomicRef<'a, Vec<f32>>> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => Some(b[0].buffer.data.borrow()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn mono_f32_mut<'a>(&'a mut self) -> Option<AtomicRefMut<'a, Vec<f32>>> {
-        match &mut self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => Some(b[0].buffer.data.borrow_mut()),
-            _ => None,
-        }
-    }
-
-    #[inline]
-    pub fn stereo_f32<'a>(&'a self) -> Option<(AtomicRef<'a, Vec<f32>>, AtomicRef<'a, Vec<f32>>)> {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(b) => {
-                if b.len() > 1 {
-                    Some((b[0].buffer.data.borrow(), b[1].buffer.data.borrow()))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-
     #[inline]
     pub fn stereo_f32_mut<'a>(
         &'a mut self,
@@ -590,64 +296,13 @@ impl AudioPortBufferMut {
         match &mut self._raw_channels {
             RawAudioChannelBuffers::F32(b) => {
                 if b.len() > 1 {
-                    Some((b[0].buffer.data.borrow_mut(), b[1].buffer.data.borrow_mut()))
+                    Some((b[0].borrow_mut(), b[1].borrow_mut()))
                 } else {
                     None
                 }
             }
             _ => None,
         }
-    }
-
-    pub fn is_channel_silent(&self, ch: usize, use_slow_check: bool, frames: usize) -> bool {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(buffers) => {
-                if let Some(buf) = buffers.get(ch) {
-                    if self.constant_mask & (1 << ch) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
-                            return false;
-                        }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-            RawAudioChannelBuffers::F64(buffers) => {
-                if let Some(buf) = buffers.get(ch) {
-                    if self.constant_mask & (1 << ch) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
-                            return false;
-                        }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-        }
-
-        true
     }
 
     pub fn is_silent(&self, use_slow_check: bool, frames: usize) -> bool {
