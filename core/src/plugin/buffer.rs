@@ -161,10 +161,7 @@ impl Debug for RawAudioChannelBuffers {
 
 pub struct AudioPortBuffer {
     pub _raw_channels: RawAudioChannelBuffers,
-
     latency: u32,
-
-    constant_mask: u64,
 }
 
 impl Debug for AudioPortBuffer {
@@ -175,73 +172,34 @@ impl Debug for AudioPortBuffer {
 
 impl AudioPortBuffer {
     pub fn _new(buffers: SmallVec<[SharedBuffer<f32>; 2]>, latency: u32) -> Self {
-        Self { _raw_channels: RawAudioChannelBuffers::F32(buffers), latency, constant_mask: 0 }
-    }
-
-    pub fn _sync_constant_mask_from_buffers(&mut self) {
-        self.constant_mask = 0;
-
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    if buf.is_constant() {
-                        self.constant_mask |= 1 << i;
-                    }
-                }
-            }
-            RawAudioChannelBuffers::F64(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    if buf.is_constant() {
-                        self.constant_mask |= 1 << i;
-                    }
-                }
-            }
-        }
+        Self { _raw_channels: RawAudioChannelBuffers::F32(buffers), latency }
     }
 
     pub fn latency(&self) -> u32 {
         self.latency
     }
 
-    pub fn is_silent(&self, use_slow_check: bool, frames: usize) -> bool {
+    pub fn is_silent(&self, frames: usize) -> bool {
         match &self._raw_channels {
             RawAudioChannelBuffers::F32(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    if self.constant_mask & (1 << i) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
+                for buf in buffers.iter() {
+                    let buf = buf.borrow();
+                    let buf = &buf[0..frames.min(buf.len())];
+                    for x in buf.iter() {
+                        if *x != 0.0 {
                             return false;
                         }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
                     }
                 }
             }
             RawAudioChannelBuffers::F64(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    if self.constant_mask & (1 << i) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
+                for buf in buffers.iter() {
+                    let buf = buf.borrow();
+                    let buf = &buf[0..frames.min(buf.len())];
+                    for x in buf.iter() {
+                        if *x != 0.0 {
                             return false;
                         }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
                     }
                 }
             }
@@ -256,7 +214,6 @@ impl AudioPortBuffer {
 pub struct AudioPortBufferMut {
     pub _raw_channels: RawAudioChannelBuffers,
     latency: u32,
-    pub constant_mask: u64,
 }
 
 impl Debug for AudioPortBufferMut {
@@ -267,26 +224,11 @@ impl Debug for AudioPortBufferMut {
 
 impl AudioPortBufferMut {
     pub fn _new(buffers: SmallVec<[SharedBuffer<f32>; 2]>, latency: u32) -> Self {
-        Self { _raw_channels: RawAudioChannelBuffers::F32(buffers), latency, constant_mask: 0 }
+        Self { _raw_channels: RawAudioChannelBuffers::F32(buffers), latency }
     }
 
     pub fn latency(&self) -> u32 {
         self.latency
-    }
-
-    pub fn _sync_constant_mask_to_buffers(&mut self) {
-        match &self._raw_channels {
-            RawAudioChannelBuffers::F32(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    buf.set_constant(self.constant_mask & (1 << i) == 1);
-                }
-            }
-            RawAudioChannelBuffers::F64(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    buf.set_constant(self.constant_mask & (1 << i) == 1);
-                }
-            }
-        }
     }
 
     #[inline]
@@ -303,45 +245,27 @@ impl AudioPortBufferMut {
         }
     }
 
-    pub fn is_silent(&self, use_slow_check: bool, frames: usize) -> bool {
+    pub fn is_silent(&self, frames: usize) -> bool {
         match &self._raw_channels {
             RawAudioChannelBuffers::F32(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    if self.constant_mask & (1 << i) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
+                for buf in buffers {
+                    let buf = buf.borrow();
+                    let buf = &buf[0..frames.min(buf.len())];
+                    for x in buf.iter() {
+                        if *x != 0.0 {
                             return false;
                         }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
                     }
                 }
             }
             RawAudioChannelBuffers::F64(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    if self.constant_mask & (1 << i) != 0 {
-                        let buf = buf.borrow();
-                        if buf[0] != 0.0 {
+                for buf in buffers {
+                    let buf = buf.borrow();
+                    let buf = &buf[0..frames.min(buf.len())];
+                    for x in buf.iter() {
+                        if *x != 0.0 {
                             return false;
                         }
-                    } else if use_slow_check {
-                        let buf = buf.borrow();
-                        let buf = &buf[0..frames.min(buf.len())];
-                        for x in buf.iter() {
-                            if *x != 0.0 {
-                                return false;
-                            }
-                        }
-                    } else {
-                        return false;
                     }
                 }
             }
@@ -351,21 +275,15 @@ impl AudioPortBufferMut {
     }
 
     pub fn clear_all(&mut self, frames: usize) {
-        self.constant_mask = 0;
-
         match &self._raw_channels {
             RawAudioChannelBuffers::F32(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    self.constant_mask |= 1 << i;
-                    let mut buf = buf.borrow_mut();
-                    buf[0..frames].fill(0.0);
+                for buf in buffers {
+                    buf.clear_until(frames);
                 }
             }
             RawAudioChannelBuffers::F64(buffers) => {
-                for (i, buf) in buffers.iter().enumerate() {
-                    self.constant_mask |= 1 << i;
-                    let mut buf = buf.borrow_mut();
-                    buf[0..frames].fill(0.0);
+                for buf in buffers {
+                    buf.clear_until(frames);
                 }
             }
         }

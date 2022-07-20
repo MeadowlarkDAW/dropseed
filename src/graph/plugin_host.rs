@@ -881,12 +881,7 @@ impl PluginInstanceHostAudioThread {
         if self.processing_state == ProcessingState::Started(ProcessStatus::ContinueIfNotQuiet)
             && !has_note_in_event
         {
-            // Sync constant masks for more efficient silence checking.
-            for buf in buffers.audio_in.iter_mut() {
-                buf._sync_constant_mask_from_buffers();
-            }
-
-            if buffers.audio_inputs_silent(true, proc_info.frames) {
+            if buffers.audio_inputs_silent(proc_info.frames) {
                 self.plugin.stop_processing();
 
                 self.processing_state = ProcessingState::Stopped;
@@ -929,16 +924,6 @@ impl PluginInstanceHostAudioThread {
             }
 
             self.state.set_state(PluginState::Active);
-        }
-
-        // Sync constant masks for the plugin.
-        if self.processing_state != ProcessingState::Started(ProcessStatus::ContinueIfNotQuiet) {
-            for buf in buffers.audio_in.iter_mut() {
-                buf._sync_constant_mask_from_buffers();
-            }
-        }
-        for buf in buffers.audio_out.iter_mut() {
-            buf.constant_mask = 0;
         }
 
         let new_status =
@@ -1161,10 +1146,6 @@ impl PluginInstanceHostAudioThread {
             }
             good_status => ProcessingState::Started(good_status),
         };
-
-        for buf in buffers.audio_out.iter_mut() {
-            buf._sync_constant_mask_to_buffers();
-        }
     }
 }
 
