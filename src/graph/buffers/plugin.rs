@@ -1,7 +1,11 @@
 use crate::graph::buffers::events::{NoteEvent, ParamEvent, PluginEvent};
+use crate::graph::buffers::sanitization::PluginEventOutputSanitizer;
+use crate::graph::plugin_host::{AudioToMainParamValue, ParamQueuesAudioThread};
+use crate::utils::reducing_queue::ReducFnvProducerRefMut;
 use crate::EventBuffer;
 use clack_host::utils::Cookie;
 use dropseed_core::plugin::buffer::SharedBuffer;
+use dropseed_core::plugin::ParamID;
 use smallvec::SmallVec;
 
 // TODO: remove pubs
@@ -28,9 +32,8 @@ impl PluginEventIoBuffers {
 
     pub fn write_input_events(&self, raw_event_buffer: &mut EventBuffer) -> (bool, bool) {
         let wrote_note_event = self.write_input_note_events(raw_event_buffer);
-        let wrote_param_event = self.write_input_param_events(raw_event_buffer); // TODO
+        let wrote_param_event = self.write_input_param_events(raw_event_buffer);
 
-        // TODO: clearer output type?
         (wrote_note_event, wrote_param_event)
     }
 
@@ -51,7 +54,7 @@ impl PluginEventIoBuffers {
                     note_port_index: note_port_index as i16,
                     event: *event,
                 };
-                event.write_to_buffer(raw_event_buffer);
+                event.write_to_clap_buffer(raw_event_buffer);
                 wrote_note_event = true;
             }
         }
@@ -65,10 +68,48 @@ impl PluginEventIoBuffers {
             for event in in_buf.borrow().iter() {
                 // TODO: handle cookies?
                 let event = PluginEvent::ParamEvent { cookie: Cookie::empty(), event: *event };
-                event.write_to_buffer(raw_event_buffer);
+                event.write_to_clap_buffer(raw_event_buffer);
                 wrote_param_event = true;
             }
         }
         wrote_param_event
+    }
+
+    pub fn read_output_events(
+        &mut self,
+        raw_event_buffer: &EventBuffer,
+        external_parameter_queue: Option<
+            &mut ReducFnvProducerRefMut<ParamID, AudioToMainParamValue>,
+        >,
+        sanitizer: &mut PluginEventOutputSanitizer,
+        param_target_plugin_id: u64,
+    ) {
+        let events_iter = raw_event_buffer
+            .iter()
+            .filter_map(|e| PluginEvent::read_from_clap(e, param_target_plugin_id));
+        let events_iter = sanitizer.sanitize(events_iter);
+
+        for event in events_iter {
+            match event {
+                PluginEvent::NoteEvent { note_port_index, event } => {
+                    if let Some(Some(b)) = self.note_out_buffers.get(note_port_index as usize) {
+                        b.borrow_mut().push(event)
+                    }
+                }
+                PluginEvent::ParamEvent { cookie: _, event } => {
+                    if let Some(buffer) = &mut self.param_out_buffer {
+                        buffer.borrow().push(event)
+                    }
+
+                    if let Some(queue) = external_parameter_queue {
+                        if let Some(value) =
+                            AudioToMainParamValue::from_param_event(event.event_type)
+                        {
+                            queue.set_or_update(ParamID::new(event.parameter_id), value);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

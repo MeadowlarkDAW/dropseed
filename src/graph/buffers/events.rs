@@ -54,7 +54,95 @@ pub enum PluginEvent {
 }
 
 impl PluginEvent {
-    pub fn write_to_buffer(&self, buffer: &mut EventBuffer) {
+    pub fn read_from_clap(
+        clap_event: &UnknownEvent,
+        target_plugin_instance_id: u64,
+    ) -> Option<Self> {
+        match clap_event.as_core_event()? {
+            CoreEventSpace::NoteOn(NoteOnEvent(e)) => Some(PluginEvent::NoteEvent {
+                note_port_index: e.port_index(),
+                event: NoteEvent {
+                    channel: e.channel(),
+                    key: e.key(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: NoteEventType::On { velocity: e.velocity() },
+                },
+            }),
+            CoreEventSpace::NoteOff(NoteOffEvent(e)) => Some(PluginEvent::NoteEvent {
+                note_port_index: e.port_index(),
+                event: NoteEvent {
+                    channel: e.channel(),
+                    key: e.key(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: NoteEventType::Off { velocity: e.velocity() },
+                },
+            }),
+            CoreEventSpace::NoteChoke(NoteChokeEvent(e)) => Some(PluginEvent::NoteEvent {
+                note_port_index: e.port_index(),
+                event: NoteEvent {
+                    channel: e.channel(),
+                    key: e.key(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: NoteEventType::Choke,
+                },
+            }),
+            CoreEventSpace::NoteExpression(e) => Some(PluginEvent::NoteEvent {
+                note_port_index: e.port_index(),
+                event: NoteEvent {
+                    channel: e.channel(),
+                    key: e.key(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: NoteEventType::Expression {
+                        expression_type: e.expression_type()?,
+                        value: e.value(),
+                    },
+                },
+            }),
+
+            CoreEventSpace::ParamValue(e) => Some(PluginEvent::ParamEvent {
+                cookie: e.cookie(),
+                event: ParamEvent {
+                    plugin_instance_id: target_plugin_instance_id,
+                    parameter_id: e.param_id(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: ParamEventType::Value(e.value()),
+                },
+            }),
+            CoreEventSpace::ParamMod(e) => Some(PluginEvent::ParamEvent {
+                cookie: e.cookie(),
+                event: ParamEvent {
+                    plugin_instance_id: target_plugin_instance_id,
+                    parameter_id: e.param_id(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: ParamEventType::Modulation(e.value()),
+                },
+            }),
+            CoreEventSpace::ParamGestureBegin(e) => Some(PluginEvent::ParamEvent {
+                cookie: Cookie::empty(),
+                event: ParamEvent {
+                    plugin_instance_id: target_plugin_instance_id,
+                    parameter_id: e.param_id(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: ParamEventType::BeginGesture,
+                },
+            }),
+            CoreEventSpace::ParamGestureEnd(e) => Some(PluginEvent::ParamEvent {
+                cookie: Cookie::empty(),
+                event: ParamEvent {
+                    plugin_instance_id: target_plugin_instance_id,
+                    parameter_id: e.param_id(),
+                    header: EventHeader { time: e.header().time() },
+                    event_type: ParamEventType::EndGesture,
+                },
+            }),
+
+            // TODO: handle MIDI events & note end events
+            _ => None,
+        }
+    }
+
+    pub fn write_to_clap_buffer(&self, buffer: &mut EventBuffer) {
+        // TODO: Clack event types are a mouthful
         match self {
             PluginEvent::NoteEvent {
                 note_port_index,

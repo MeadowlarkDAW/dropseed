@@ -15,8 +15,9 @@ use std::sync::{
     Arc,
 };
 
-use crate::graph::buffers::events::{NoteEvent, ParamEvent};
+use crate::graph::buffers::events::{NoteEvent, ParamEvent, ParamEventType};
 use crate::graph::buffers::plugin::PluginEventIoBuffers;
+use crate::graph::buffers::sanitization::PluginEventOutputSanitizer;
 use crate::{DSEngineEvent, PluginEvent};
 use dropseed_core::plugin::buffer::SharedBuffer;
 use dropseed_core::plugin::ext::audio_ports::PluginAudioPortsExt;
@@ -37,7 +38,6 @@ use crate::utils::reducing_queue::{
 #[derive(Clone, Copy)]
 struct MainToAudioParamValue {
     value: f64,
-    _cookie: Cookie,
 }
 
 impl ReducFnvValue for MainToAudioParamValue {}
@@ -48,7 +48,7 @@ pub struct ParamGestureInfo {
 }
 
 #[derive(Clone, Copy)]
-struct AudioToMainParamValue {
+pub(crate) struct AudioToMainParamValue {
     value: Option<f64>,
     gesture: Option<ParamGestureInfo>,
 }
@@ -61,6 +61,21 @@ impl ReducFnvValue for AudioToMainParamValue {
 
         if new_value.gesture.is_some() {
             self.gesture = new_value.gesture;
+        }
+    }
+}
+
+impl AudioToMainParamValue {
+    pub fn from_param_event(event: ParamEventType) -> Option<Self> {
+        match event {
+            ParamEventType::Value(value) => Some(Self { value: Some(value), gesture: None }),
+            ParamEventType::Modulation(_) => None, // TODO: handle mod events
+            ParamEventType::BeginGesture => {
+                Some(Self { value: None, gesture: Some(ParamGestureInfo { is_begin: true }) })
+            }
+            ParamEventType::EndGesture => {
+                Some(Self { value: None, gesture: Some(ParamGestureInfo { is_begin: false }) })
+            }
         }
     }
 }
@@ -122,10 +137,7 @@ impl PluginParamsExt {
                 if param_info.flags.contains(ParamInfoFlags::IS_READONLY) {
                     log::warn!("Ignored request to set parameter value: parameter with id {:?} is read only", &param_id);
                 } else {
-                    ui_to_audio_param_value_tx.set(
-                        param_id,
-                        MainToAudioParamValue { value, _cookie: param_info._cookie },
-                    );
+                    ui_to_audio_param_value_tx.set(param_id, MainToAudioParamValue { value });
                     ui_to_audio_param_value_tx.producer_done();
                 }
             } else {
@@ -142,10 +154,7 @@ impl PluginParamsExt {
     pub fn set_mod_amount(&mut self, param_id: ParamID, amount: f64) {
         if let Some(ui_to_audio_param_mod_tx) = &mut self.ui_to_audio_param_mod_tx {
             if let Some(param_info) = self.params.get(&param_id) {
-                ui_to_audio_param_mod_tx.set(
-                    param_id,
-                    MainToAudioParamValue { value: amount, _cookie: param_info._cookie },
-                );
+                ui_to_audio_param_mod_tx.set(param_id, MainToAudioParamValue { value: amount });
                 ui_to_audio_param_mod_tx.producer_done();
             } else {
                 log::warn!(
@@ -163,8 +172,8 @@ struct ParamQueuesMainThread {
     audio_to_main_param_value_rx: ReducFnvConsumer<ParamID, AudioToMainParamValue>,
 }
 
-struct ParamQueuesAudioThread {
-    audio_to_main_param_value_tx: ReducFnvProducer<ParamID, AudioToMainParamValue>,
+pub(crate) struct ParamQueuesAudioThread {
+    pub(crate) audio_to_main_param_value_tx: ReducFnvProducer<ParamID, AudioToMainParamValue>,
 
     ui_to_audio_param_value_rx: ReducFnvConsumer<ParamID, MainToAudioParamValue>,
     ui_to_audio_param_mod_rx: ReducFnvConsumer<ParamID, MainToAudioParamValue>,
@@ -532,9 +541,6 @@ impl PluginInstanceHost {
 
                 self.param_queues = param_queues_main_thread;
 
-                let mut is_adjusting_parameter = FnvHashMap::default();
-                is_adjusting_parameter.reserve(num_params * 2);
-
                 let has_automation_out_port = plugin_main_thread.has_automation_out_port();
 
                 self.audio_thread = Some(SharedPluginHostAudioThread::new(
@@ -545,7 +551,7 @@ impl PluginInstanceHost {
                         param_queues: param_queues_audio_thread,
                         in_events: EventBuffer::with_capacity(num_params * 3),
                         out_events: EventBuffer::with_capacity(num_params * 3),
-                        is_adjusting_parameter,
+                        event_output_sanitizer: PluginEventOutputSanitizer::new(num_params),
                         processing_state: ProcessingState::WaitingForStart,
                     },
                     coll_handle,
@@ -764,7 +770,7 @@ pub(crate) struct PluginInstanceHostAudioThread {
     in_events: EventBuffer,
     out_events: EventBuffer,
 
-    is_adjusting_parameter: FnvHashMap<ParamID, bool>,
+    event_output_sanitizer: PluginEventOutputSanitizer,
 
     processing_state: ProcessingState,
 }
@@ -816,7 +822,7 @@ impl PluginInstanceHostAudioThread {
             .unwrap_or(false);
 
         let (has_note_in_event, wrote_param_in_event) =
-            event_buffers.write_input_events(&mut self.out_events);
+            event_buffers.write_input_events(&mut self.in_events);
 
         has_param_in_event = has_param_in_event || wrote_param_in_event;
 
@@ -877,203 +883,29 @@ impl PluginInstanceHostAudioThread {
 
         self.in_events.clear();
 
+        event_buffers.read_output_events(
+            &self.out_events,
+            None,
+            &mut self.event_output_sanitizer,
+            0, // TODO: find right plugin instance ID value
+        );
+
         if let Some(params_queue) = &mut self.param_queues {
-            // TODO: Change this to not take a closure so we don't
-            // have to duplicate this code.
-            params_queue.audio_to_main_param_value_tx.produce(|mut queue| {
-                for out_event in &self.out_events {
-                        let mut push_to_event_out = false;
-                        let mut push_to_note_out_i = None;
-                        match out_event.as_core_event() {
-                            Some(CoreEventSpace::ParamGestureBegin(event)) => {
-                                // TODO: Use event.time for more accurate recording of automation.
-
-                                let param_id = ParamID::new(event.param_id());
-                                let is_adjusting =
-                                    self.is_adjusting_parameter.entry(param_id).or_insert(false);
-
-                                if *is_adjusting {
-                                    log::warn!(
-                                        "The plugin sent BEGIN_ADJUST twice. The event was ignored."
-                                    );
-                                    continue;
-                                }
-
-                                *is_adjusting = true;
-
-                                let value = AudioToMainParamValue {
-                                    value: None,
-                                    gesture: Some(ParamGestureInfo { is_begin: true }),
-                                };
-
-                                queue.set_or_update(param_id, value);
-                            }
-                            Some(CoreEventSpace::ParamGestureEnd(event)) => {
-                                let param_id = ParamID::new(event.param_id());
-                                let is_adjusting =
-                                    self.is_adjusting_parameter.entry(param_id).or_insert(false);
-
-                                if !*is_adjusting {
-                                    log::warn!(
-                                        "The plugin sent END_ADJUST without a preceding BEGIN_ADJUST. The event was ignored."
-                                    );
-                                    continue;
-                                }
-
-                                *is_adjusting = false;
-
-                                let value = AudioToMainParamValue {
-                                    value: None,
-                                    gesture: Some(ParamGestureInfo { is_begin: false }),
-                                };
-
-                                queue.set_or_update(param_id, value);
-                            }
-                            Some(CoreEventSpace::ParamValue(event)) => {
-                                // TODO: Use event.time for more accurate recording of automation.
-                                let param_id = ParamID::new(event.param_id());
-
-                                queue.set_or_update(param_id, AudioToMainParamValue {
-                                    value: Some(event.value()),
-                                    gesture: None,
-                                });
-                            }
-                            Some(CoreEventSpace::ParamMod(_)) | Some(CoreEventSpace::Transport(_)) => {
-                                // This will only be `Some` if the plugin returned `true` in `has_event_out_port()`.
-                                if event_out_buffer.is_some() {
-                                    push_to_event_out = true;
-                                }
-                            }
-                            Some(CoreEventSpace::NoteOn(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.0.port_index() as usize);
-                                }
-                            }
-                            Some(CoreEventSpace::NoteOff(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.0.port_index() as usize);
-                                }
-                            }
-                            Some(CoreEventSpace::NoteEnd(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.0.port_index() as usize);
-                                }
-                            }
-                            Some(CoreEventSpace::NoteChoke(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.0.port_index() as usize);
-                                }
-                            }
-                            Some(CoreEventSpace::NoteExpression(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.port_index() as usize);
-                                }
-                            }
-                            Some(CoreEventSpace::Midi(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.port_index() as usize);
-                                }
-                            }
-                            /*
-                            Some(CoreEventSpace::MidiSysex(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.port_index() as usize);
-                                }
-                            }
-                            */
-                            Some(CoreEventSpace::Midi2(event)) => {
-                                if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                                    push_to_note_out_i = Some(event.port_index() as usize);
-                                }
-                            }
-                            _ => {}
-                        }
-
-                        if push_to_event_out {
-                            let out_buf = event_out_buffer.as_ref().unwrap();
-
-                            let mut b = out_buf.borrow_mut();
-
-                            b.push(ProcEvent::from_unknown(out_event).unwrap());
-                        } else if let Some(buf_i) = push_to_note_out_i {
-                            let out_buf = note_out_buffers[buf_i].as_ref().unwrap();
-
-                            let mut b = out_buf.borrow_mut();
-
-                            b.push(ProcEvent::from_unknown(out_event).unwrap());
-                        }
-                }
+            params_queue.audio_to_main_param_value_tx.produce(|mut producer| {
+                event_buffers.read_output_events(
+                    &self.out_events,
+                    Some(&mut producer),
+                    &mut self.event_output_sanitizer,
+                    0, // TODO: find right plugin instance ID value
+                )
             });
         } else {
-            for out_event in &self.out_events {
-                let mut push_to_event_out = false;
-                let mut push_to_note_out_i = None;
-                match out_event.as_core_event() {
-                    Some(CoreEventSpace::ParamMod(_)) | Some(CoreEventSpace::Transport(_)) => {
-                        // This will only be `Some` if the plugin returned `true` in `has_event_out_port()`.
-                        if event_out_buffer.is_some() {
-                            push_to_event_out = true;
-                        }
-                    }
-                    Some(CoreEventSpace::NoteOn(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                            push_to_note_out_i = Some(event.0.port_index() as usize);
-                        }
-                    }
-                    Some(CoreEventSpace::NoteOff(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                            push_to_note_out_i = Some(event.0.port_index() as usize);
-                        }
-                    }
-                    Some(CoreEventSpace::NoteEnd(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                            push_to_note_out_i = Some(event.0.port_index() as usize);
-                        }
-                    }
-                    Some(CoreEventSpace::NoteChoke(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.0.port_index() as usize) {
-                            push_to_note_out_i = Some(event.0.port_index() as usize);
-                        }
-                    }
-                    Some(CoreEventSpace::NoteExpression(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                            push_to_note_out_i = Some(event.port_index() as usize);
-                        }
-                    }
-                    Some(CoreEventSpace::Midi(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                            push_to_note_out_i = Some(event.port_index() as usize);
-                        }
-                    }
-                    /*
-                    Some(CoreEventSpace::MidiSysex(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                            push_to_note_out_i = Some(event.port_index() as usize);
-                        }
-                    }
-                    */
-                    Some(CoreEventSpace::Midi2(event)) => {
-                        if let Some(Some(_)) = note_out_buffers.get(event.port_index() as usize) {
-                            push_to_note_out_i = Some(event.port_index() as usize);
-                        }
-                    }
-                    _ => {}
-                }
-
-                if push_to_event_out {
-                    let out_buf = event_out_buffer.as_ref().unwrap();
-
-                    let mut b = out_buf.borrow_mut();
-
-                    b.push(ProcEvent::from_unknown(out_event).unwrap());
-                } else if let Some(buf_i) = push_to_note_out_i {
-                    let out_buf = note_out_buffers[buf_i].as_ref().unwrap();
-
-                    let mut b = out_buf.borrow_mut();
-
-                    b.push(ProcEvent::from_unknown(out_event).unwrap());
-                }
-            }
+            event_buffers.read_output_events(
+                &self.out_events,
+                None,
+                &mut self.event_output_sanitizer,
+                0, // TODO: find right plugin instance ID value
+            );
         }
 
         self.out_events.clear();
