@@ -21,6 +21,7 @@ pub struct ParamEvent {
     pub header: EventHeader,
     pub parameter_id: u32,
     pub event_type: ParamEventType,
+    pub plugin_instance_id: u64,
 }
 
 // Contains common data
@@ -49,7 +50,7 @@ pub enum ParamEventType {
 #[derive(Copy, Clone)]
 pub enum PluginEvent {
     NoteEvent { note_port_index: i16, event: NoteEvent },
-    ParamEvent { cookie: Cookie },
+    ParamEvent { cookie: Cookie, event: ParamEvent },
 }
 
 impl PluginEvent {
@@ -71,16 +72,18 @@ impl PluginEvent {
                     .as_unknown(),
                 ),
                 NoteEventType::Expression { expression_type, value } => buffer.push(
-                    NoteExpressionEvent(ClackNoteEvent::new(
+                    NoteExpressionEvent::new(
                         ClackEventHeader::new(*time),
                         -1,
                         *note_port_index,
                         *key,
                         *channel,
-                        *velocity,
-                    ))
+                        *value,
+                        *expression_type,
+                    )
                     .as_unknown(),
                 ),
+
                 NoteEventType::Choke => buffer.push(
                     NoteChokeEvent(ClackNoteEvent::new(
                         ClackEventHeader::new(*time),
@@ -92,6 +95,7 @@ impl PluginEvent {
                     ))
                     .as_unknown(),
                 ),
+
                 NoteEventType::Off { velocity } => buffer.push(
                     NoteOffEvent(ClackNoteEvent::new(
                         ClackEventHeader::new(*time),
@@ -104,7 +108,51 @@ impl PluginEvent {
                     .as_unknown(),
                 ),
             },
-            PluginEvent::ParamEvent { .. } => {}
+            PluginEvent::ParamEvent {
+                cookie,
+                event:
+                    ParamEvent {
+                        header: EventHeader { time },
+                        parameter_id,
+                        event_type,
+                        plugin_instance_id: _,
+                    },
+            } => match event_type {
+                ParamEventType::Value(value) => buffer.push(
+                    ParamValueEvent::new(
+                        ClackEventHeader::new(*time),
+                        *cookie,
+                        -1,
+                        *parameter_id,
+                        -1,
+                        -1,
+                        -1,
+                        *value,
+                    )
+                    .as_unknown(),
+                ),
+                ParamEventType::Modulation(modulation_amount) => buffer.push(
+                    ParamModEvent::new(
+                        ClackEventHeader::new(*time),
+                        *cookie,
+                        -1,
+                        *parameter_id,
+                        -1,
+                        -1,
+                        -1,
+                        *modulation_amount,
+                    )
+                    .as_unknown(),
+                ),
+                ParamEventType::BeginGesture => buffer.push(
+                    ParamGestureBeginEvent::new(ClackEventHeader::new(*time), *parameter_id)
+                        .as_unknown(),
+                ),
+                ParamEventType::EndGesture => buffer.push(
+                    ParamGestureEndEvent::new(ClackEventHeader::new(*time), *parameter_id)
+                        .as_unknown(),
+                ),
+            },
         }
     }
 }

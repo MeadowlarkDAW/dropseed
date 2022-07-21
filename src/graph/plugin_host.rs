@@ -815,56 +815,10 @@ impl PluginInstanceHostAudioThread {
             .map(|q| q.consume_into_event_buffer(&mut self.in_events))
             .unwrap_or(false);
 
-        for (port_i, in_buffers) in note_in_buffers.iter().enumerate() {
-            if let Some(in_buffers) = in_buffers {
-                for in_buf in in_buffers.iter() {
-                    let mut b = in_buf.borrow_mut();
+        let (has_note_in_event, wrote_param_in_event) =
+            event_buffers.write_input_events(&mut self.out_events);
 
-                    for mut event in b.drain(..) {
-                        let mut do_add = true;
-                        match &mut event {
-                            ProcEvent::NoteOn(e) => e.0.set_port_index(port_i as i16),
-                            ProcEvent::NoteOff(e) => e.0.set_port_index(port_i as i16),
-                            ProcEvent::NoteChoke(e) => e.0.set_port_index(port_i as i16),
-                            ProcEvent::NoteEnd(e) => e.0.set_port_index(port_i as i16),
-                            ProcEvent::NoteExpression(e) => e.set_port_index(port_i as i16),
-                            ProcEvent::Midi(e) => e.set_port_index(port_i as u16),
-                            ProcEvent::Midi2(e) => e.set_port_index(port_i as u16),
-                            _ => do_add = false,
-                        }
-
-                        if do_add {
-                            has_note_in_event = true;
-                            self.in_events.push(event.as_unknown());
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(event_in_buffers) = event_in_buffers {
-            for in_buf in event_in_buffers.iter() {
-                let mut b = in_buf.borrow_mut();
-
-                for event in b.drain(..) {
-                    let do_add = match &event {
-                        ProcEvent::ParamValue(_, Some(target_plugin))
-                        | ProcEvent::ParamMod(_, Some(target_plugin))
-                            if *target_plugin == self.id.unique_id() =>
-                        {
-                            has_param_in_event = true;
-                            true
-                        }
-                        ProcEvent::Transport(_) => true,
-                        _ => false,
-                    };
-
-                    if do_add {
-                        self.in_events.push(event.as_unknown());
-                    }
-                }
-            }
-        }
+        has_param_in_event = has_param_in_event || wrote_param_in_event;
 
         if let Some(transport_in_event) = proc_info.transport.event() {
             self.in_events.push(transport_in_event.as_unknown());

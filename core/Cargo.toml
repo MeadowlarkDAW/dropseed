@@ -7,8 +7,8 @@ edition = "2021"
 
 [dependencies]
 meadowlark-core-types = "0.3"
-clack-host = { git = "https://github.com/prokopyl/clack", rev = "604faffe1bd3e89f8327fe6dd5b293e2027027bc" }
-clack-extensions = { git = "https://github.com/prokopyl/clack", features = ["clack-host", "audio-ports", "gui", "log", "note-ports", "params", "state", "thread-check"], rev = "604faffe1bd3e89f8327fe6dd5b293e2027027bc" }
+clack-host = { git = "https://github.com/prokopyl/clack", rev = "782bbfce72f6b3505dc70807bbebadcb3dc5ac1b" }
+clack-extensions = { git = "https://github.com/prokopyl/clack", features = ["clack-host", "audio-ports", "gui", "log", "note-ports", "params", "state", "thread-check"], rev = "782bbfce72f6b3505dc70807bbebadcb3dc5ac1b" }
 basedrop = "0.1"
 smallvec = "1.7"
 bitflags = "1.3"
