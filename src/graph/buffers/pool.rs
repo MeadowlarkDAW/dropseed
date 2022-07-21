@@ -1,5 +1,5 @@
+use crate::graph::buffers::events::{NoteEvent, ParamEvent};
 use dropseed_core::plugin::buffer::{DebugBufferID, DebugBufferType, SharedBuffer};
-use dropseed_core::plugin::ProcEvent;
 
 pub struct BufferPool<T: Clone + Copy + Send + Sync + 'static> {
     pool: Vec<SharedBuffer<T>>,
@@ -69,8 +69,8 @@ pub struct SharedBufferPool {
     pub audio_buffer_pool: BufferPool<f32>,
     pub intermediary_audio_buffer_pool: BufferPool<f32>,
 
-    pub event_buffer_pool: BufferPool<ProcEvent>,
-    pub note_buffer_pool: BufferPool<ProcEvent>, // TODO: this should be NoteEvent
+    pub param_event_buffer_pool: BufferPool<ParamEvent>,
+    pub note_buffer_pool: BufferPool<NoteEvent>,
 }
 
 impl SharedBufferPool {
@@ -96,7 +96,7 @@ impl SharedBufferPool {
                 DebugBufferType::Note,
                 coll_handle.clone(),
             ),
-            event_buffer_pool: BufferPool::new(
+            param_event_buffer_pool: BufferPool::new(
                 event_buffer_size,
                 DebugBufferType::Event,
                 coll_handle,
@@ -114,6 +114,6 @@ impl SharedBufferPool {
         self.audio_buffer_pool.pool.truncate(audio_buffer_count + 1);
         self.intermediary_audio_buffer_pool.pool.truncate(intermediary_audio_buffer_count + 1);
         self.note_buffer_pool.pool.truncate(note_buffers_count + 1);
-        self.event_buffer_pool.pool.truncate(event_buffer_count + 1);
+        self.param_event_buffer_pool.pool.truncate(event_buffer_count + 1);
     }
 }

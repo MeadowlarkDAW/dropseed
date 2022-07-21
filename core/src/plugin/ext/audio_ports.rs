@@ -44,58 +44,44 @@ impl PluginAudioPortsExt {
         num_outputs as usize
     }
 
-    pub fn main_in_channels(&self) -> usize {
-        match self.main_ports_layout {
-            MainPortsLayout::InOut | MainPortsLayout::InOnly => self.inputs[0].channels as usize,
-            _ => 0,
-        }
-    }
-
-    pub fn main_out_channels(&self) -> usize {
-        match self.main_ports_layout {
-            MainPortsLayout::InOut | MainPortsLayout::OutOnly => self.outputs[0].channels as usize,
-            _ => 0,
-        }
-    }
-
-    pub fn in_channel_index(&self, port_stable_id: u32, port_channel: u16) -> Result<usize, ()> {
-        // TODO: Optimize this?
+    pub fn in_channel_index(&self, port_stable_id: u32, port_channel: u16) -> Option<usize> {
+        // TODO: Optimize this? This should be cached in PortChannelId
 
         let mut channel_i: u16 = 0;
 
         for p in self.inputs.iter() {
             if p.stable_id == port_stable_id {
-                if port_channel < p.channels {
-                    return Ok((channel_i + port_channel) as usize);
+                return if port_channel < p.channels {
+                    Some((channel_i + port_channel) as usize)
                 } else {
-                    return Err(());
-                }
+                    None
+                };
             } else {
                 channel_i += p.channels;
             }
         }
 
-        Err(())
+        None
     }
 
-    pub fn out_channel_index(&self, port_stable_id: u32, port_channel: u16) -> Result<usize, ()> {
-        // TODO: Optimize this?
+    pub fn out_channel_index(&self, port_stable_id: u32, port_channel: u16) -> Option<usize> {
+        // TODO: Optimize this? This should be cached in PortChannelId
 
         let mut channel_i: u16 = 0;
 
         for p in self.outputs.iter() {
             if p.stable_id == port_stable_id {
-                if port_channel < p.channels {
-                    return Ok((channel_i + port_channel) as usize);
+                return if port_channel < p.channels {
+                    Some((channel_i + port_channel) as usize)
                 } else {
-                    return Err(());
-                }
+                    None
+                };
             } else {
                 channel_i += p.channels;
             }
         }
 
-        Err(())
+        None
     }
 
     pub const fn empty() -> Self {

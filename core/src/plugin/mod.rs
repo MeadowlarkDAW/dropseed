@@ -14,7 +14,6 @@ mod instance_id;
 mod process_info;
 mod save_state;
 
-pub use event::ProcEvent;
 pub use ext::params::ParamID;
 pub use host_info::HostInfo;
 pub use host_request_channel::*;

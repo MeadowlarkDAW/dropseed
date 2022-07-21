@@ -15,6 +15,8 @@ use std::sync::{
     Arc,
 };
 
+use crate::graph::buffers::events::{NoteEvent, ParamEvent};
+use crate::graph::buffers::plugin::PluginEventIoBuffers;
 use crate::{DSEngineEvent, PluginEvent};
 use dropseed_core::plugin::buffer::SharedBuffer;
 use dropseed_core::plugin::ext::audio_ports::PluginAudioPortsExt;
@@ -22,8 +24,7 @@ use dropseed_core::plugin::ext::note_ports::PluginNotePortsExt;
 use dropseed_core::plugin::ext::params::{ParamID, ParamInfo, ParamInfoFlags};
 use dropseed_core::plugin::{
     HostRequestChannelReceiver, HostRequestFlags, PluginAudioThread, PluginInstanceID,
-    PluginMainThread, PluginPreset, PluginSaveState, ProcBuffers, ProcEvent, ProcInfo,
-    ProcessStatus,
+    PluginMainThread, PluginPreset, PluginSaveState, ProcBuffers, ProcInfo, ProcessStatus,
 };
 use dropseed_core::plugin_scanner::{PluginFormat, ScannedPluginKey};
 use dropseed_core::transport::TempoMap;
@@ -773,19 +774,10 @@ impl PluginInstanceHostAudioThread {
         &mut self,
         proc_info: &ProcInfo,
         buffers: &mut ProcBuffers,
-        event_in_buffers: &Option<SmallVec<[SharedBuffer<ProcEvent>; 2]>>,
-        event_out_buffer: &Option<SharedBuffer<ProcEvent>>,
-        note_in_buffers: &[Option<SmallVec<[SharedBuffer<ProcEvent>; 2]>>],
-        note_out_buffers: &[Option<SharedBuffer<ProcEvent>>],
+        event_buffers: &mut PluginEventIoBuffers,
     ) {
         // Always clear event and note output buffers.
-        if let Some(out_buf) = event_out_buffer {
-            out_buf.borrow_mut().clear();
-        }
-
-        for out_buf in note_out_buffers.iter().flatten() {
-            out_buf.borrow_mut().clear();
-        }
+        event_buffers.clear_before_process();
 
         let state = self.state.get_state();
 

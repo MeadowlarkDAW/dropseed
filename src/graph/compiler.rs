@@ -4,10 +4,11 @@ use basedrop::Shared;
 use smallvec::SmallVec;
 use std::error::Error;
 
+use crate::graph::buffers::plugin::PluginEventIoBuffers;
 use crate::graph::buffers::pool::SharedBufferPool;
 use dropseed_core::plugin::buffer::{AudioPortBuffer, AudioPortBufferMut, SharedBuffer};
 use dropseed_core::plugin::ext::audio_ports::MainPortsLayout;
-use dropseed_core::plugin::{ProcBuffers, ProcEvent};
+use dropseed_core::plugin::ProcBuffers;
 
 use super::schedule::transport_task::TransportTask;
 use crate::graph::shared_pool::{DelayCompKey, SharedDelayCompNode};
@@ -72,34 +73,21 @@ pub(crate) fn compile_graph(
         let mut intermediary_buffer_i = 0;
 
         let mut plugin_in_channel_buffers: SmallVec<[Option<SharedBuffer<f32>>; 4]> =
-            SmallVec::with_capacity(num_audio_in_channels);
+            SmallVec::from_elem(None, num_audio_in_channels);
         let mut plugin_out_channel_buffers: SmallVec<[Option<SharedBuffer<f32>>; 4]> =
-            SmallVec::with_capacity(num_audio_out_channels);
-        for _ in 0..num_audio_in_channels {
-            plugin_in_channel_buffers.push(None);
-        }
-        for _ in 0..num_audio_out_channels {
-            plugin_out_channel_buffers.push(None);
-        }
+            SmallVec::from_elem(None, num_audio_out_channels);
 
         let (num_note_in_ports, num_note_out_ports) = if let Some(note_ports_ext) = note_ports_ext {
             (note_ports_ext.inputs.len(), note_ports_ext.outputs.len())
         } else {
             (0, 0)
         };
-        let mut note_in_buffers: SmallVec<[Option<SmallVec<[SharedBuffer<ProcEvent>; 2]>>; 2]> =
-            SmallVec::with_capacity(num_note_in_ports);
-        let mut note_out_buffers: SmallVec<[Option<SharedBuffer<ProcEvent>>; 2]> =
-            SmallVec::with_capacity(num_note_out_ports);
-        for _ in 0..num_note_in_ports {
-            note_in_buffers.push(None);
-        }
-        for _ in 0..num_note_out_ports {
-            note_out_buffers.push(None);
-        }
 
-        let mut automation_in_buffers: Option<SmallVec<[SharedBuffer<ProcEvent>; 2]>> = None;
-        let mut automation_out_buffer: Option<SharedBuffer<ProcEvent>> = None;
+        let mut note_in_buffers = SmallVec::from_elem(None, num_note_in_ports);
+        let mut note_out_buffers = SmallVec::from_elem(None, num_note_out_ports);
+
+        let mut automation_in_buffers = None;
+        let mut automation_out_buffer = None;
 
         let mut next_audio_in_channel_index = 0;
         let mut next_audio_out_channel_index = 0;
@@ -112,8 +100,8 @@ pub(crate) fn compile_graph(
                             port_channel_id.port_stable_id,
                             port_channel_id.port_channel,
                         ) {
-                            Ok(index) => index,
-                            Err(()) => {
+                            Some(index) => index,
+                            None => {
                                 return Err(GraphCompilerError::UnexpectedError(format!(
                                     "Abstract schedule refers to an input port with ID {} and channel {} in the plugin {:?} that doesn't exist",
                                     port_channel_id.port_stable_id,
@@ -213,8 +201,7 @@ pub(crate) fn compile_graph(
                     plugin_in_channel_buffers[channel_index] = Some(channel_buffer);
                 }
                 PortType::ParamAutomation => {
-                    let mut bufs: SmallVec<[SharedBuffer<ProcEvent>; 2]> =
-                        SmallVec::with_capacity(buffers.len());
+                    let mut bufs = SmallVec::with_capacity(buffers.len());
 
                     for (buffer, _delay_comp_info) in buffers.iter() {
                         // TODO: Use delay compensation?
@@ -222,8 +209,9 @@ pub(crate) fn compile_graph(
                         max_graph_automation_buffer_index =
                             max_graph_automation_buffer_index.max(buffer.buffer_id);
 
-                        let buffer =
-                            shared_buffer_pool.event_buffer_pool.buffer_at_index(buffer.buffer_id);
+                        let buffer = shared_buffer_pool
+                            .param_event_buffer_pool
+                            .buffer_at_index(buffer.buffer_id);
 
                         bufs.push(buffer);
                     }
@@ -235,8 +223,7 @@ pub(crate) fn compile_graph(
                         // TODO: Optimize this?
                         for (port_i, port) in note_ports_ext.inputs.iter().enumerate() {
                             if port_channel_id.port_stable_id == port.stable_id {
-                                let mut bufs: SmallVec<[SharedBuffer<ProcEvent>; 2]> =
-                                    SmallVec::with_capacity(buffers.len());
+                                let mut bufs = SmallVec::with_capacity(buffers.len());
 
                                 for (buffer, _delay_comp_info) in buffers.iter() {
                                     // TODO: Use delay compensation?
@@ -272,8 +259,8 @@ pub(crate) fn compile_graph(
                             port_channel_id.port_stable_id,
                             port_channel_id.port_channel,
                         ) {
-                            Ok(index) => index,
-                            Err(()) => {
+                            Some(index) => index,
+                            None => {
                                 return Err(GraphCompilerError::UnexpectedError(format!(
                                     "Abstract schedule refers to an output port with ID {} and channel {} in the plugin {:?} that doesn't exist",
                                     port_channel_id.port_stable_id,
@@ -296,8 +283,9 @@ pub(crate) fn compile_graph(
                     max_graph_automation_buffer_index =
                         max_graph_automation_buffer_index.max(buffer.buffer_id);
 
-                    let buffer =
-                        shared_buffer_pool.event_buffer_pool.buffer_at_index(buffer.buffer_id);
+                    let buffer = shared_buffer_pool
+                        .param_event_buffer_pool
+                        .buffer_at_index(buffer.buffer_id);
 
                     automation_out_buffer = Some(buffer);
                 }
@@ -438,10 +426,12 @@ pub(crate) fn compile_graph(
         tasks.push(Task::Plugin(PluginTask {
             plugin: plugin_audio_thread,
             buffers: ProcBuffers { audio_in, audio_out },
-            automation_in_buffers,
-            automation_out_buffer,
-            note_in_buffers,
-            note_out_buffers,
+            event_buffers: PluginEventIoBuffers {
+                unmixed_param_in_buffers: automation_in_buffers,
+                param_out_buffer: automation_out_buffer,
+                unmixed_note_in_buffers: note_in_buffers,
+                note_out_buffers,
+            },
         }));
     }
 
