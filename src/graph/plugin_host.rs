@@ -880,13 +880,6 @@ impl PluginInstanceHostAudioThread {
 
         self.in_events.clear();
 
-        event_buffers.read_output_events(
-            &self.out_events,
-            None,
-            &mut self.event_output_sanitizer,
-            0, // TODO: find right plugin instance ID value
-        );
-
         if let Some(params_queue) = &mut self.param_queues {
             params_queue.audio_to_main_param_value_tx.produce(|mut producer| {
                 event_buffers.read_output_events(

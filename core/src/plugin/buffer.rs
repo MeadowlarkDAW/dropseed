@@ -127,10 +127,6 @@ impl<T: Clone + Copy + Send + Sync + 'static + Default> SharedBuffer<T> {
         let frames = frames.min(buf_ref.len());
 
         buf_ref[0..frames].fill(T::default());
-
-        if frames >= buf_ref.len() {
-            self.set_constant(true);
-        }
     }
 }
 
