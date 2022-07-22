@@ -22,8 +22,8 @@ use dropseed_core::plugin::ext::audio_ports::PluginAudioPortsExt;
 use dropseed_core::plugin::ext::note_ports::PluginNotePortsExt;
 use dropseed_core::plugin::ext::params::{ParamID, ParamInfo, ParamInfoFlags};
 use dropseed_core::plugin::{
-    HostRequestChannelReceiver, HostRequestFlags, PluginAudioThread, PluginInstanceID,
-    PluginMainThread, PluginPreset, PluginSaveState, ProcBuffers, ProcInfo, ProcessStatus,
+    HostRequestChannelReceiver, HostRequestFlags, PluginInstanceID, PluginMainThread, PluginPreset,
+    PluginSaveState,
 };
 use dropseed_core::plugin_scanner::{PluginFormat, ScannedPluginKey};
 use dropseed_core::transport::TempoMap;
@@ -32,6 +32,9 @@ use crate::graph::shared_pool::SharedPluginHostAudioThread;
 use crate::utils::reducing_queue::{
     ReducFnvConsumer, ReducFnvProducer, ReducFnvValue, ReducingFnvQueue,
 };
+
+mod audio_thread;
+pub(crate) use audio_thread::*;
 
 #[derive(Clone, Copy)]
 struct MainToAudioParamValue {
@@ -542,16 +545,13 @@ impl PluginInstanceHost {
                 let has_automation_out_port = plugin_main_thread.has_automation_out_port();
 
                 self.audio_thread = Some(SharedPluginHostAudioThread::new(
-                    PluginInstanceHostAudioThread {
-                        id: self.id.clone(),
-                        plugin: info.audio_thread,
-                        state: Arc::clone(&self.state),
-                        param_queues: param_queues_audio_thread,
-                        in_events: EventBuffer::with_capacity(num_params * 3),
-                        out_events: EventBuffer::with_capacity(num_params * 3),
-                        event_output_sanitizer: PluginEventOutputSanitizer::new(num_params),
-                        processing_state: ProcessingState::WaitingForStart,
-                    },
+                    PluginInstanceHostAudioThread::new(
+                        self.id.clone(),
+                        info.audio_thread,
+                        Arc::clone(&self.state),
+                        param_queues_audio_thread,
+                        num_params,
+                    ),
                     coll_handle,
                 ));
 
@@ -747,184 +747,6 @@ pub(crate) enum OnIdleResult {
     PluginActivated(PluginHandle, FnvHashMap<ParamID, f64>),
     PluginReadyToRemove,
     PluginFailedToActivate(ActivatePluginError),
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum ProcessingState {
-    WaitingForStart,
-    Started(ProcessStatus),
-    Stopped,
-    Errored,
-}
-
-pub(crate) struct PluginInstanceHostAudioThread {
-    pub id: PluginInstanceID,
-
-    plugin: Box<dyn PluginAudioThread>,
-
-    state: Arc<SharedPluginState>,
-
-    param_queues: Option<ParamQueuesAudioThread>,
-    in_events: EventBuffer,
-    out_events: EventBuffer,
-
-    event_output_sanitizer: PluginEventOutputSanitizer,
-
-    processing_state: ProcessingState,
-}
-
-impl PluginInstanceHostAudioThread {
-    pub fn process(
-        &mut self,
-        proc_info: &ProcInfo,
-        buffers: &mut ProcBuffers,
-        event_buffers: &mut PluginEventIoBuffers,
-    ) {
-        // Always clear event and note output buffers.
-        event_buffers.clear_before_process();
-
-        let state = self.state.get_state();
-
-        // Do we want to deactivate the plugin?
-        if state == PluginState::WaitingToDrop {
-            if let ProcessingState::Started(_) = self.processing_state {
-                self.plugin.stop_processing();
-            }
-
-            buffers.clear_all_outputs(proc_info);
-            self.in_events.clear();
-            return;
-        } else if self.state.start_processing.load(Ordering::Relaxed) {
-            self.state.start_processing.store(false, Ordering::Relaxed);
-
-            if let ProcessingState::Started(_) = self.processing_state {
-            } else {
-                self.processing_state = ProcessingState::WaitingForStart;
-            }
-        }
-
-        // We can't process a plugin which failed to start processing.
-        if self.processing_state == ProcessingState::Errored {
-            buffers.clear_all_outputs(proc_info);
-            self.in_events.clear();
-            return;
-        }
-
-        self.out_events.clear();
-
-        let mut has_param_in_event = self
-            .param_queues
-            .as_mut()
-            .map(|q| q.consume_into_event_buffer(&mut self.in_events))
-            .unwrap_or(false);
-
-        let (has_note_in_event, wrote_param_in_event) =
-            event_buffers.write_input_events(&mut self.in_events);
-
-        has_param_in_event = has_param_in_event || wrote_param_in_event;
-
-        if let Some(transport_in_event) = proc_info.transport.event() {
-            self.in_events.push(transport_in_event.as_unknown());
-        }
-
-        if self.processing_state == ProcessingState::Started(ProcessStatus::ContinueIfNotQuiet)
-            && !has_note_in_event
-        {
-            if buffers.audio_inputs_silent(proc_info.frames) {
-                self.plugin.stop_processing();
-
-                self.processing_state = ProcessingState::Stopped;
-                buffers.clear_all_outputs(proc_info);
-
-                if has_param_in_event {
-                    self.plugin.param_flush(&self.in_events, &mut self.out_events);
-                }
-
-                self.in_events.clear();
-                return;
-            }
-        }
-
-        if let ProcessingState::Stopped | ProcessingState::WaitingForStart = self.processing_state {
-            if self.processing_state == ProcessingState::Stopped && !has_note_in_event {
-                // The plugin is sleeping, there is no request to wake it up, and there
-                // are no events to process.
-                buffers.clear_all_outputs(proc_info);
-
-                if has_param_in_event {
-                    self.plugin.param_flush(&self.in_events, &mut self.out_events);
-                }
-
-                self.in_events.clear();
-                return;
-            }
-
-            if self.plugin.start_processing().is_err() {
-                // The plugin failed to start processing.
-                self.processing_state = ProcessingState::Errored;
-                buffers.clear_all_outputs(proc_info);
-
-                if has_param_in_event {
-                    self.plugin.param_flush(&self.in_events, &mut self.out_events);
-                }
-
-                self.in_events.clear();
-                return;
-            }
-
-            self.state.set_state(PluginState::Active);
-        }
-
-        let new_status =
-            self.plugin.process(proc_info, buffers, &self.in_events, &mut self.out_events);
-
-        self.in_events.clear();
-
-        if let Some(params_queue) = &mut self.param_queues {
-            params_queue.audio_to_main_param_value_tx.produce(|mut producer| {
-                event_buffers.read_output_events(
-                    &self.out_events,
-                    Some(&mut producer),
-                    &mut self.event_output_sanitizer,
-                    0, // TODO: find right plugin instance ID value
-                )
-            });
-        } else {
-            event_buffers.read_output_events(
-                &self.out_events,
-                None,
-                &mut self.event_output_sanitizer,
-                0, // TODO: find right plugin instance ID value
-            );
-        }
-
-        self.out_events.clear();
-
-        self.processing_state = match new_status {
-            // ProcessStatus::Tail => TODO: handle tail by reading from the tail extension
-            ProcessStatus::Sleep => {
-                self.plugin.stop_processing();
-
-                ProcessingState::Stopped
-            }
-            ProcessStatus::Error => {
-                // Discard all output buffers.
-                buffers.clear_all_outputs(proc_info);
-                ProcessingState::Errored
-            }
-            good_status => ProcessingState::Started(good_status),
-        };
-    }
-}
-
-impl Drop for PluginInstanceHostAudioThread {
-    fn drop(&mut self) {
-        if let ProcessingState::Started(_) = self.processing_state {
-            self.plugin.stop_processing();
-        }
-
-        self.state.set_state(PluginState::DroppedAndReadyToDeactivate);
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
