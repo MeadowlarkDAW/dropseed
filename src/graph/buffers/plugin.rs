@@ -1,6 +1,6 @@
 use crate::graph::buffers::events::{NoteEvent, ParamEvent, PluginEvent};
 use crate::graph::buffers::sanitization::PluginEventOutputSanitizer;
-use crate::graph::plugin_host::{AudioToMainParamValue, ParamQueuesAudioThread};
+use crate::graph::plugin_host::AudioToMainParamValue;
 use crate::utils::reducing_queue::ReducFnvProducerRefMut;
 use crate::EventBuffer;
 use clack_host::utils::Cookie;
@@ -44,7 +44,7 @@ impl PluginEventIoBuffers {
             .iter()
             .enumerate()
             .filter_map(|(i, e)| e.as_ref().map(|e| (i, e)))
-            .flat_map(|(i, b)| b.iter().map(|b| (i, b.borrow())));
+            .flat_map(|(i, b)| b.iter().map(move |b| (i, b.borrow())));
 
         let mut wrote_note_event = false;
 
@@ -78,7 +78,7 @@ impl PluginEventIoBuffers {
     pub fn read_output_events(
         &mut self,
         raw_event_buffer: &EventBuffer,
-        external_parameter_queue: Option<
+        mut external_parameter_queue: Option<
             &mut ReducFnvProducerRefMut<ParamID, AudioToMainParamValue>,
         >,
         sanitizer: &mut PluginEventOutputSanitizer,
@@ -98,10 +98,10 @@ impl PluginEventIoBuffers {
                 }
                 PluginEvent::ParamEvent { cookie: _, event } => {
                     if let Some(buffer) = &mut self.param_out_buffer {
-                        buffer.borrow().push(event)
+                        buffer.borrow_mut().push(event)
                     }
 
-                    if let Some(queue) = external_parameter_queue {
+                    if let Some(queue) = external_parameter_queue.as_mut() {
                         if let Some(value) =
                             AudioToMainParamValue::from_param_event(event.event_type)
                         {

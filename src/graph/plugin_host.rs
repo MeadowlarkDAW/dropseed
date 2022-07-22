@@ -1,7 +1,6 @@
 use basedrop::Shared;
 use clack_host::events::event_types::{ParamModEvent, ParamValueEvent};
 use clack_host::events::io::EventBuffer;
-use clack_host::events::spaces::CoreEventSpace;
 use clack_host::events::{Event, EventFlags, EventHeader};
 use clack_host::utils::Cookie;
 use crossbeam_channel::Sender;
@@ -15,11 +14,10 @@ use std::sync::{
     Arc,
 };
 
-use crate::graph::buffers::events::{NoteEvent, ParamEvent, ParamEventType};
+use crate::graph::buffers::events::ParamEventType;
 use crate::graph::buffers::plugin::PluginEventIoBuffers;
 use crate::graph::buffers::sanitization::PluginEventOutputSanitizer;
 use crate::{DSEngineEvent, PluginEvent};
-use dropseed_core::plugin::buffer::SharedBuffer;
 use dropseed_core::plugin::ext::audio_ports::PluginAudioPortsExt;
 use dropseed_core::plugin::ext::note_ports::PluginNotePortsExt;
 use dropseed_core::plugin::ext::params::{ParamID, ParamInfo, ParamInfoFlags};
@@ -48,7 +46,7 @@ pub struct ParamGestureInfo {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct AudioToMainParamValue {
+pub struct AudioToMainParamValue {
     value: Option<f64>,
     gesture: Option<ParamGestureInfo>,
 }
@@ -814,7 +812,6 @@ impl PluginInstanceHostAudioThread {
 
         self.out_events.clear();
 
-        let mut has_note_in_event = false;
         let mut has_param_in_event = self
             .param_queues
             .as_mut()

@@ -5,7 +5,7 @@ use clack_host::events::io::EventBuffer;
 use meadowlark_core_types::time::SampleRate;
 
 pub mod buffer;
-pub mod event;
+pub use clack_host::events::event_types as event;
 pub mod ext;
 
 mod host_info;

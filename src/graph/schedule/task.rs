@@ -1,6 +1,7 @@
 use smallvec::SmallVec;
 use std::fmt::{Debug, Error, Formatter, Write};
 
+use crate::graph::buffers::events::{NoteEvent, ParamEvent};
 use crate::graph::buffers::plugin::PluginEventIoBuffers;
 use dropseed_core::plugin::buffer::SharedBuffer;
 use dropseed_core::plugin::{ProcBuffers, ProcInfo};
@@ -198,9 +199,9 @@ pub(crate) struct DeactivatedPluginTask {
     pub audio_through: SmallVec<[(SharedBuffer<f32>, SharedBuffer<f32>); 4]>,
     pub extra_audio_out: SmallVec<[SharedBuffer<f32>; 4]>,
 
-    pub automation_out_buffer: Option<SharedBuffer<ProcEvent>>,
+    pub automation_out_buffer: Option<SharedBuffer<ParamEvent>>,
 
-    pub note_out_buffers: SmallVec<[Option<SharedBuffer<ProcEvent>>; 2]>,
+    pub note_out_buffers: SmallVec<[Option<SharedBuffer<NoteEvent>>; 2]>,
 }
 
 impl DeactivatedPluginTask {
