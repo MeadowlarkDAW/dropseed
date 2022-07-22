@@ -15,8 +15,6 @@ use std::sync::{
 };
 
 use crate::graph::buffers::events::ParamEventType;
-use crate::graph::buffers::plugin::PluginEventIoBuffers;
-use crate::graph::buffers::sanitization::PluginEventOutputSanitizer;
 use crate::{DSEngineEvent, PluginEvent};
 use dropseed_core::plugin::ext::audio_ports::PluginAudioPortsExt;
 use dropseed_core::plugin::ext::note_ports::PluginNotePortsExt;
@@ -154,7 +152,7 @@ impl PluginParamsExt {
 
     pub fn set_mod_amount(&mut self, param_id: ParamID, amount: f64) {
         if let Some(ui_to_audio_param_mod_tx) = &mut self.ui_to_audio_param_mod_tx {
-            if let Some(param_info) = self.params.get(&param_id) {
+            if let Some(_param_info) = self.params.get(&param_id) {
                 ui_to_audio_param_mod_tx.set(param_id, MainToAudioParamValue { value: amount });
                 ui_to_audio_param_mod_tx.producer_done();
             } else {
