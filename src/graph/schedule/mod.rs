@@ -131,7 +131,7 @@ impl Schedule {
 
                     in_buffer.set_constant(is_constant);
                 } else {
-                    in_buffer.clear_f32(frames);
+                    in_buffer.clear_until(frames);
                 }
             }
 

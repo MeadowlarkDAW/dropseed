@@ -50,18 +50,9 @@ pub struct ProcBuffers {
 }
 
 impl ProcBuffers {
-    pub fn audio_inputs_silent(&self, use_slow_check: bool, frames: usize) -> bool {
+    pub fn audio_inputs_silent(&self, frames: usize) -> bool {
         for buf in self.audio_in.iter() {
-            if !buf.is_silent(use_slow_check, frames) {
-                return false;
-            }
-        }
-        true
-    }
-
-    pub fn audio_outputs_silent(&self, use_slow_check: bool, frames: usize) -> bool {
-        for buf in self.audio_out.iter() {
-            if !buf.is_silent(use_slow_check, frames) {
+            if !buf.is_silent(frames) {
                 return false;
             }
         }
@@ -71,9 +62,6 @@ impl ProcBuffers {
     pub fn clear_all_outputs(&mut self, proc_info: &ProcInfo) {
         for buf in self.audio_out.iter_mut() {
             buf.clear_all(proc_info.frames);
-        }
-        for b in self.audio_out.iter_mut() {
-            b._sync_constant_mask_to_buffers();
         }
     }
 }
