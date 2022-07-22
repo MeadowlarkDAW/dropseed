@@ -101,29 +101,30 @@ impl PluginInstanceHostAudioThread {
 
         has_param_in_event = has_param_in_event || wrote_param_in_event;
 
-        // //
-
         if let Some(transport_in_event) = proc_info.transport.event() {
             self.in_events.push(transport_in_event.as_unknown());
         }
 
+        // Check if inputs are quiet or not //
+
         if self.processing_state == ProcessingState::Started(ProcessStatus::ContinueIfNotQuiet)
             && !has_note_in_event
+            && buffers.audio_inputs_silent(proc_info.frames)
         {
-            if buffers.audio_inputs_silent(proc_info.frames) {
-                self.plugin.stop_processing();
+            self.plugin.stop_processing();
 
-                self.processing_state = ProcessingState::Stopped;
-                buffers.clear_all_outputs(proc_info);
+            self.processing_state = ProcessingState::Stopped;
+            buffers.clear_all_outputs(proc_info);
 
-                if has_param_in_event {
-                    self.plugin.param_flush(&self.in_events, &mut self.out_events);
-                }
-
-                self.in_events.clear();
-                return;
+            if has_param_in_event {
+                self.plugin.param_flush(&self.in_events, &mut self.out_events);
             }
+
+            self.in_events.clear();
+            return;
         }
+
+        // Check if the plugin should be waking up //
 
         if let ProcessingState::Stopped | ProcessingState::WaitingForStart = self.processing_state {
             if self.processing_state == ProcessingState::Stopped && !has_note_in_event {
@@ -154,9 +155,13 @@ impl PluginInstanceHostAudioThread {
             self.state.set_state(PluginState::Active);
         }
 
+        // Actual processing //
+
         self.out_events.clear();
         let new_status =
             self.plugin.process(proc_info, buffers, &self.in_events, &mut self.out_events);
+
+        // Read from output events queue //
 
         if let Some(params_queue) = &mut self.param_queues {
             params_queue.audio_to_main_param_value_tx.produce(|mut producer| {
@@ -175,6 +180,8 @@ impl PluginInstanceHostAudioThread {
                 0, // TODO: find right plugin instance ID value
             );
         }
+
+        // Update processing state //
 
         self.processing_state = match new_status {
             // ProcessStatus::Tail => TODO: handle tail by reading from the tail extension

@@ -38,7 +38,6 @@ atomic_refcell = "0.1"
 fnv = "1.0"
 log = "0.4"
 thread-priority = "0.8"
-recycle_vec = "1.0"
 cpal = { version = "0.13", optional = true }
 walkdir = { version = "2.3.2", optional = true }
 
